@@ -1,0 +1,17 @@
+# Gap Analysis - Generated Files
+
+# Temporary files (scripts create temp dirs but clean them up)
+*.tmp
+*.log
+
+# Python cache (for scripts/lib/parse-credentials-request.py)
+__pycache__/
+*.pyc
+*.pyo
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store

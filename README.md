@@ -135,35 +135,6 @@ Compares Google Cloud Workload Identity Federation policies to identify:
 # Exit code 1: Differences found
 ```
 
-## CI Integration (Prow)
-
-The scripts are designed to run in Prow CI jobs with exit-code based status. Example Prow job configuration in `.prow/config.yaml`:
-
-```yaml
-periodics:
-- name: gap-analysis-all-platforms-4-21-to-4-22
-  interval: 24h
-  decorate: true
-  spec:
-    containers:
-    - image: gap-analysis:latest
-      command:
-      - /bin/bash
-      - -c
-      - |
-        set -e
-        if ./scripts/gap-all.sh --baseline 4.21 --target 4.22; then
-          echo "No policy changes detected in any platform between 4.21 and 4.22"
-        else
-          echo "Policy changes detected - failing job for visibility"
-          exit 1
-        fi
-```
-
-**Exit Behavior:**
-- Exit code `0`: Job succeeds (no policy differences in any platform)
-- Exit code `1`: Job fails (policy differences detected in at least one platform)
-
 ## Script Arguments
 
 Individual gap analysis scripts:
@@ -301,12 +272,7 @@ get_sts_policy "4.22" > "$target_policy"
 compare_sts_policies "$baseline_policy" "$target_policy" | jq '.actions'
 ```
 
-## License
-
-[Add your license here]
-
 ## Support
 
 For issues or questions:
-- Open an issue in this repository
-- Contact the OpenShift gap analysis team
+- Get in touch with ROSA SRE team

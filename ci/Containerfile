@@ -1,0 +1,57 @@
+# CI build-root image for gap-analysis
+# Used by ci-operator via build_root.project_image.dockerfile_path
+# Tools are layer-cached — installs only re-run when this file changes
+
+FROM registry.access.redhat.com/ubi9/ubi:latest
+
+ARG OC_VERSION=4.21
+ARG YQ_VERSION=v4.52.4
+
+# System packages
+RUN dnf install --allowerasing -y \
+        git \
+        make \
+        bash \
+        jq \
+        curl \
+        wget \
+        python3 \
+        python3-pip \
+        python3-pyyaml \
+        findutils \
+        diffutils \
+        coreutils \
+    && dnf clean all
+
+# Install yq (YAML processor - recommended for parsing CredentialsRequests)
+RUN arch=$(uname -m) && \
+    case "${arch}" in \
+        x86_64)  YQ_ARCH="amd64" ;; \
+    esac && \
+    curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" -o /usr/local/bin/yq && \
+    chmod +x /usr/local/bin/yq && \
+    yq --version
+
+# Install oc CLI (OpenShift client - required for 'oc adm release extract')
+RUN curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-${OC_VERSION}/openshift-client-linux.tar.gz" -o /tmp/oc.tar.gz && \
+    tar -xzf /tmp/oc.tar.gz -C /usr/local/bin oc kubectl && \
+    chmod +x /usr/local/bin/oc /usr/local/bin/kubectl && \
+    rm -f /tmp/oc.tar.gz && \
+    oc version --client
+
+# Pre-create cache directories writable by any UID (OpenShift runs as random UID)
+RUN mkdir -p /tmp/.cache /tmp/gap-analysis-data && \
+    chmod -R 777 /tmp/.cache /tmp/gap-analysis-data
+
+ENV HOME=/tmp
+ENV XDG_CACHE_HOME=/tmp/.cache
+
+# Verify all required tools are installed
+RUN echo "Verifying tool installations..." && \
+    bash --version && \
+    jq --version && \
+    yq --version && \
+    oc version --client && \
+    python3 --version && \
+    python3 -c "import yaml; print('PyYAML available')" && \
+    echo "All tools verified successfully"

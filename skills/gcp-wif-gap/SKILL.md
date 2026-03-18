@@ -27,7 +27,7 @@ Analyze differences in GCP Workload Identity Federation policies between OpenShi
 
 ## Workflow
 
-1. Parse baseline and target versions (e.g., `4.21` → `4.22`)
+1. Parse baseline and target versions (default: auto-detect latest stable → latest candidate)
 2. Extract credential requests from release payloads using `oc adm release extract --cloud=gcp`
 3. Convert CredentialsRequest YAML manifests to GCP IAM policy format
 4. Compare IAM roles, permissions, and service account bindings
@@ -35,6 +35,16 @@ Analyze differences in GCP Workload Identity Federation policies between OpenShi
 
 ## Script Usage
 
+**Auto-detect versions (recommended):**
+```bash
+# Compares latest stable → latest candidate
+./scripts/gap-gcp-wif.sh
+
+# Use nightly as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-gcp-wif.sh
+```
+
+**Explicit versions:**
 ```bash
 ./scripts/gap-gcp-wif.sh \
   --baseline <version> \
@@ -42,17 +52,32 @@ Analyze differences in GCP Workload Identity Federation policies between OpenShi
   [--verbose]
 ```
 
-**Example:**
+**Examples:**
 ```bash
-./scripts/gap-gcp-wif.sh \
-  --baseline 4.21 \
-  --target 4.22 \
-  --verbose
+# Auto-detect
+./scripts/gap-gcp-wif.sh
+
+# Explicit versions
+./scripts/gap-gcp-wif.sh --baseline 4.21 --target 4.22 --verbose
+
+# Full version strings
+./scripts/gap-gcp-wif.sh --baseline 4.21.6 --target 4.22.0-ec.3
+
+# Environment variables
+BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 ./scripts/gap-gcp-wif.sh
+
+# Use nightly
+TARGET_VERSION=NIGHTLY ./scripts/gap-gcp-wif.sh
 ```
 
 **Exit Codes:**
 - `0`: No policy differences found
 - `1`: Policy differences detected
+
+**Version Resolution:**
+- CLI flags > Environment variables > Auto-detect
+- Auto-detect: latest stable (baseline) → latest candidate (target)
+- Special keywords: `TARGET_VERSION=NIGHTLY` or `TARGET_VERSION=CANDIDATE`
 
 Note: Platform is always 'gcp' for this script.
 

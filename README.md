@@ -18,48 +18,84 @@ This repository provides both automated scripts (for CI/Prow) and Claude AI skil
 - `oc` CLI (OpenShift client) - **required** for extracting credential requests from releases
 - `jq` - **required** for JSON processing
 - `yq` or `python3` with PyYAML - **required** for YAML parsing
+- `curl` - **required** for fetching release information
 - Claude Code (optional) - for using AI skills
 
 ### Local Usage
 
-#### Run a single gap analysis
+#### Auto-detect versions (recommended)
 
 ```bash
-# Analyze AWS STS policy gaps between versions
-./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22
+# Run analysis with auto-detected versions
+# Baseline: latest stable version (e.g., 4.21.6)
+# Target: latest candidate version (e.g., 4.22.0-ec.3)
+./scripts/gap-all.sh
 # Exit code 0: No differences, Exit code 1: Differences found
+
+# Auto-detect with nightly target
+TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
+
+# Individual platform analysis with auto-detection
+./scripts/gap-aws-sts.sh
+./scripts/gap-gcp-wif.sh
+```
+
+#### Specify versions explicitly
+
+```bash
+# Analyze AWS STS policy gaps between specific versions
+./scripts/gap-aws-sts.sh --baseline 4.21.6 --target 4.22.0-ec.3
 
 # Analyze GCP WIF policy gaps
 ./scripts/gap-gcp-wif.sh --baseline 4.21 --target 4.22
-# Exit code 0: No differences, Exit code 1: Differences found
-```
 
-#### Run gap analysis with gap-all.sh
-
-```bash
 # Run analysis for both AWS STS and GCP WIF
 ./scripts/gap-all.sh --baseline 4.21 --target 4.22
-# Automatically runs both AWS and GCP analyses
+```
+
+#### Use environment variables
+
+```bash
+# Override versions using environment variables
+BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 ./scripts/gap-all.sh
+
+# Use nightly build as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-aws-sts.sh
+
+# Explicit candidate (same as default)
+TARGET_VERSION=CANDIDATE ./scripts/gap-gcp-wif.sh
 ```
 
 #### Use in CI/CD pipelines
 
 ```bash
-# Block on policy changes (any platform)
+# Block on policy changes (auto-detect versions)
+if ! ./scripts/gap-all.sh; then
+  echo "Policy changes detected - review required"
+  exit 1
+fi
+
+# Test against nightly builds
+if ! TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh; then
+  echo "Policy changes detected in nightly - review required"
+  exit 1
+fi
+
+# Explicit version checks
 if ! ./scripts/gap-all.sh --baseline 4.21 --target 4.22; then
   echo "Policy changes detected - review required"
   exit 1
 fi
 
 # Allow policy changes but notify
-if ./scripts/gap-all.sh --baseline 4.21 --target 4.22; then
+if ./scripts/gap-all.sh; then
   echo "No policy changes detected in any platform"
 else
   echo "Policy changes detected in at least one platform" | notify-slack
 fi
 
-# Individual platform checks
-if ! ./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22; then
+# Individual platform checks with auto-detection
+if ! ./scripts/gap-aws-sts.sh; then
   echo "AWS policy changes detected - review required"
   exit 1
 fi
@@ -85,7 +121,8 @@ The skills will leverage the scripts while providing intelligent analysis and re
 gap-analysis/
 ├── scripts/                    # Executable bash scripts
 │   ├── lib/                   # Shared libraries
-│   │   └── common.sh         # Utilities (logging, colors, etc.)
+│   │   ├── common.sh         # Utilities (logging, colors, etc.)
+│   │   └── openshift-releases.sh  # OpenShift version/release queries
 │   ├── gap-aws-sts.sh        # AWS STS policy gap analysis
 │   ├── gap-gcp-wif.sh        # GCP WIF policy gap analysis
 │   └── gap-all.sh            # Run all analyses
@@ -135,23 +172,112 @@ Compares Google Cloud Workload Identity Federation policies to identify:
 # Exit code 1: Differences found
 ```
 
+### 3. OpenShift Release Information Library (`lib/openshift-releases.sh`)
+
+A comprehensive library for querying OpenShift release data from Sippy API and OCP release streams.
+
+**Key Features:**
+- Auto-detect latest GA, dev, stable, and candidate versions
+- Version validation (dev = GA + 1, candidate belongs to dev, stable belongs to GA)
+- Fetch release image pullspecs
+- Query nightly builds
+- Both CLI and library (sourceable) interface
+
+**CLI Usage:**
+```bash
+# Query versions
+./scripts/lib/openshift-releases.sh --latest-ga              # 4.21
+./scripts/lib/openshift-releases.sh --latest-dev             # 4.22 (GA+1)
+./scripts/lib/openshift-releases.sh --latest-stable          # 4.21.6
+./scripts/lib/openshift-releases.sh --latest-candidate       # 4.22.0-ec.3
+./scripts/lib/openshift-releases.sh --latest-nightly         # 4.22.0-0.nightly-...
+
+# Get pullspecs
+./scripts/lib/openshift-releases.sh --latest-stable-pullspec
+# quay.io/openshift-release-dev/ocp-release:4.21.6-x86_64
+
+./scripts/lib/openshift-releases.sh --latest-candidate-pullspec
+# quay.io/openshift-release-dev/ocp-release:4.22.0-ec.3-x86_64
+
+./scripts/lib/openshift-releases.sh --latest-nightly-pullspec
+# registry.ci.openshift.org/ocp/release:4.22.0-0.nightly-...
+
+# Nightly for specific version
+./scripts/lib/openshift-releases.sh --nightly 4.22
+```
+
+**Library Usage (in scripts):**
+```bash
+source scripts/lib/openshift-releases.sh
+
+# Get versions
+ga_version=$(get_latest_ga_version)              # 4.21
+dev_version=$(get_latest_dev_version)            # 4.22
+stable=$(get_latest_stable_version)              # 4.21.6
+candidate=$(get_latest_candidate_version)        # 4.22.0-ec.3
+nightly=$(get_latest_dev_nightly_version)        # 4.22.0-0.nightly-...
+
+# Get pullspecs
+stable_pullspec=$(get_latest_stable_pullspec)
+candidate_pullspec=$(get_latest_candidate_pullspec)
+nightly_pullspec=$(get_latest_dev_nightly_pullspec)
+
+# Validation functions
+validate_version_gap "4.21" "4.22"               # Returns 0 if valid
+validate_candidate_belongs_to_version "4.22.0-ec.3" "4.22"
+validate_stable_belongs_to_version "4.21.6" "4.21"
+```
+
+**Validation Rules:**
+- Dev version must be exactly GA + 1 (e.g., GA=4.21, dev=4.22)
+- Candidate versions must belong to dev version (e.g., 4.22.0-ec.3 → 4.22)
+- Stable versions must belong to GA version (e.g., 4.21.6 → 4.21)
+- All validation is automatic when using the library functions
+
 ## Script Arguments
 
-Individual gap analysis scripts:
+### Command-line Flags
+
+All scripts support these optional flags:
 
 ```bash
---baseline <version>    # Baseline version (e.g., 4.21)
---target <version>      # Target version to compare (e.g., 4.22)
---verbose               # Enable verbose logging (optional)
+--baseline <version>    # Baseline version (default: auto-detect from latest stable)
+                        # Examples: 4.21, 4.21.6, full pullspec
+--target <version>      # Target version (default: auto-detect from latest candidate)
+                        # Examples: 4.22, 4.22.0-ec.3, full pullspec
+--verbose               # Enable verbose logging
+-h, --help              # Show help message
 ```
 
-Gap-all orchestrator script:
+### Environment Variables
+
+Override versions using environment variables (lower precedence than CLI flags):
 
 ```bash
---baseline <version>    # Baseline version (e.g., 4.21)
---target <version>      # Target version to compare (e.g., 4.22)
---verbose               # Enable verbose logging (optional)
+BASE_VERSION           # Override baseline version
+                       # Examples: 4.21.5, 4.21, full pullspec
+
+TARGET_VERSION         # Override target version
+                       # Examples: 4.22.0-ec.2, NIGHTLY, CANDIDATE
+                       # Special values:
+                       #   NIGHTLY - latest dev nightly build
+                       #   CANDIDATE - latest dev candidate (default)
 ```
+
+### Version Resolution Precedence
+
+Versions are resolved in this order (highest to lowest):
+1. **Command-line flags** (`--baseline`, `--target`)
+2. **Environment variables** (`BASE_VERSION`, `TARGET_VERSION`)
+3. **Auto-detected** (latest stable for baseline, latest candidate for target)
+
+### Auto-Detection Details
+
+When versions are auto-detected:
+- **Baseline**: Latest stable release for GA version (e.g., `4.21.6` for GA `4.21`)
+- **Target**: Latest candidate release for dev version (e.g., `4.22.0-ec.3` for dev `4.22`)
+- **Dev version**: Always exactly GA + 1 (e.g., GA=`4.21`, dev=`4.22`)
+- **Pullspecs**: Automatically fetched and used when auto-detecting
 
 **Note:** The gap-all.sh script runs analysis for both AWS and GCP platforms automatically.
 
@@ -161,17 +287,29 @@ Gap-all orchestrator script:
 
 ## Comparison Scenarios
 
-### Version Upgrade Analysis (All Platforms)
+### Auto-Detected Analysis (Recommended)
+```bash
+# Run analysis with auto-detected versions
+# Compares latest stable → latest candidate
+./scripts/gap-all.sh
+echo $?  # 0 = no changes, 1 = changes detected
+
+# Use latest nightly as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
+
+# Individual platform with auto-detection
+./scripts/gap-aws-sts.sh
+./scripts/gap-gcp-wif.sh
+```
+
+### Explicit Version Analysis
 ```bash
 # Run analysis for both AWS STS and GCP WIF: 4.21 → 4.22
 ./scripts/gap-all.sh --baseline 4.21 --target 4.22
-echo $?  # 0 = no changes in any platform, 1 = changes detected in at least one
-```
+echo $?  # 0 = no changes in any platform, 1 = changes detected
 
-### Individual Script Usage
-```bash
 # AWS STS analysis
-./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22
+./scripts/gap-aws-sts.sh --baseline 4.21.6 --target 4.22.0-ec.3
 
 # GCP WIF analysis
 ./scripts/gap-gcp-wif.sh --baseline 4.21 --target 4.22
@@ -180,21 +318,43 @@ echo $?  # 0 = no changes in any platform, 1 = changes detected in at least one
 ./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22 --verbose
 ```
 
+### Environment Variable Usage
+```bash
+# Override baseline, auto-detect target
+BASE_VERSION=4.21.5 ./scripts/gap-all.sh
+
+# Use specific versions
+BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 ./scripts/gap-all.sh
+
+# Compare stable against nightly
+TARGET_VERSION=NIGHTLY ./scripts/gap-aws-sts.sh
+```
+
 ## Output Format
 
 Scripts output log messages to stderr and exit with appropriate codes:
 
-**No differences found:**
+**Auto-detected versions (no differences found):**
 ```
+[INFO] Auto-detecting baseline version from latest stable...
+[INFO] Auto-detected baseline version: 4.21.6
+[INFO] Auto-detected baseline pullspec: quay.io/openshift-release-dev/ocp-release:4.21.6-x86_64
+[INFO] Auto-detecting target version from latest candidate...
+[INFO] Auto-detected target version: 4.22.0-ec.3
+[INFO] Auto-detected target pullspec: quay.io/openshift-release-dev/ocp-release:4.22.0-ec.3-x86_64
 [INFO] Starting AWS STS Policy Gap Analysis
-[INFO] Baseline version: 4.21
-[INFO] Target version: 4.22
+[INFO] =========================================
+[INFO] Baseline version: 4.21.6
+[INFO] Baseline pullspec: quay.io/openshift-release-dev/ocp-release:4.21.6-x86_64
+[INFO] Target version: 4.22.0-ec.3
+[INFO] Target pullspec: quay.io/openshift-release-dev/ocp-release:4.22.0-ec.3-x86_64
+[INFO] =========================================
 [INFO] Fetching baseline STS policy...
 [SUCCESS] Successfully extracted STS policy
 [INFO] Fetching target STS policy...
 [SUCCESS] Successfully extracted STS policy
 [INFO] Comparing STS policies...
-[SUCCESS] No policy differences found between 4.21 and 4.22
+[SUCCESS] No policy differences found between 4.21.6 and 4.22.0-ec.3
 ```
 Exit code: `0`
 

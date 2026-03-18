@@ -58,12 +58,13 @@ Ensure IAM permission documentation and runbooks reflect version-specific requir
 
 ```
 1. Identify baseline and target OpenShift versions
+   (or use auto-detection for latest stable → latest candidate)
    ↓
 2. Select cloud platform (AWS or GCP)
    ↓
 3. Run gap analysis script
    ↓
-4. Review credential policy changes in generated report
+4. Review credential policy changes in output
    ↓
 5. Assess security implications
    ↓
@@ -109,25 +110,53 @@ See the main [README.md](../README.md) for:
 
 ### AWS STS Analysis
 ```bash
-./scripts/gap-aws-sts.sh \
-  --baseline 4.21 \
-  --target 4.22 \
-  --output results/comparison-aws-4.21-4.22.md
+# Auto-detect versions (latest stable → latest candidate)
+./scripts/gap-aws-sts.sh
+
+# Explicit versions
+./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22
+
+# Use nightly as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-aws-sts.sh
+
+# Environment variables
+BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 ./scripts/gap-aws-sts.sh
 ```
 
 ### GCP WIF Analysis
 ```bash
-./scripts/gap-gcp-wif.sh \
-  --baseline 4.21 \
-  --target 4.22 \
-  --output results/comparison-gcp-4.21-4.22.md
+# Auto-detect versions
+./scripts/gap-gcp-wif.sh
+
+# Explicit versions
+./scripts/gap-gcp-wif.sh --baseline 4.21 --target 4.22
+
+# Use nightly as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-gcp-wif.sh
 ```
 
 ### Using gap-all.sh Orchestrator
 ```bash
-./scripts/gap-all.sh \
-  --baseline 4.21 \
-  --target 4.22 \
-  --platform aws \
-  --output-dir results/
+# Auto-detect versions (recommended)
+./scripts/gap-all.sh
+
+# Explicit versions for both platforms
+./scripts/gap-all.sh --baseline 4.21 --target 4.22
+
+# Use nightly as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
+
+# Environment variables
+BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 ./scripts/gap-all.sh
 ```
+
+### Version Resolution
+
+Versions are resolved in this order (highest to lowest priority):
+1. Command-line flags (`--baseline`, `--target`)
+2. Environment variables (`BASE_VERSION`, `TARGET_VERSION`)
+3. Auto-detected (latest stable for baseline, latest candidate for target)
+
+Special `TARGET_VERSION` values:
+- `NIGHTLY` - Uses latest dev nightly build
+- `CANDIDATE` - Uses latest dev candidate (default when auto-detecting)

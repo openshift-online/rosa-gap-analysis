@@ -38,19 +38,42 @@ Trigger this skill when:
 ### Step 1: Understand the Request
 
 Parse the comparison request to identify:
-- Baseline version (e.g., `4.21.0`)
-- Target version (e.g., `4.22.0`)
+- Baseline version (default: auto-detect latest stable, e.g., `4.21.6`)
+- Target version (default: auto-detect latest candidate, e.g., `4.22.0-ec.3`)
 - Specific focus areas (if any)
 
 ### Step 2: Run the Gap Analysis Script
 
 Execute the `scripts/gap-aws-sts.sh` script:
 
+**Auto-detect versions (recommended):**
+```bash
+# Compares latest stable → latest candidate
+./scripts/gap-aws-sts.sh
+
+# Use nightly as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-aws-sts.sh
+```
+
+**Explicit versions:**
 ```bash
 ./scripts/gap-aws-sts.sh \
   --baseline <version> \
   --target <version> \
   [--verbose]
+
+# Examples
+./scripts/gap-aws-sts.sh --baseline 4.21.6 --target 4.22.0-ec.3
+./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22
+```
+
+**Environment variables:**
+```bash
+# Override versions
+BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 ./scripts/gap-aws-sts.sh
+
+# Use nightly
+TARGET_VERSION=NIGHTLY ./scripts/gap-aws-sts.sh
 ```
 
 Note: Platform is always 'aws' for this script.
@@ -219,12 +242,28 @@ echo $?  # 0 = no changes, 1 = changes detected
 
 ## Example Interaction
 
+**User**: "Check if AWS STS policies changed between latest stable and latest candidate"
+
+**Response**:
+```bash
+# Execute the gap analysis with auto-detection
+./scripts/gap-aws-sts.sh
+```
+
 **User**: "Check if AWS STS policies changed between OpenShift 4.21 and 4.22"
 
 **Response**:
 ```bash
 # Execute the gap analysis
 ./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22 --verbose
+```
+
+**User**: "Check AWS STS policies against latest nightly"
+
+**Response**:
+```bash
+# Execute with nightly target
+TARGET_VERSION=NIGHTLY ./scripts/gap-aws-sts.sh
 ```
 
 **What happens:**
@@ -273,22 +312,31 @@ fi
 
 ## Practical Tips
 
+**Version Detection:**
+- **Auto-detect (recommended)**: No flags needed, compares latest stable → latest candidate
+- **Environment variables**: `BASE_VERSION` and `TARGET_VERSION` for CI/CD pipelines
+- **Special keywords**: `TARGET_VERSION=NIGHTLY` for nightly builds, `TARGET_VERSION=CANDIDATE` for explicit candidate
+
 **Version Format:**
-- Use full version numbers: `4.21.0` not `4.21`
-- Include patch version for accurate results
-- RC versions work: `4.22.0-rc.1`
+- Use full version numbers: `4.21.6` or `4.22.0-ec.3`
+- Major.minor works too: `4.21`, `4.22`
+- Candidate versions: `4.22.0-ec.3`, `4.22.0-rc.1`
+- Nightly versions: `4.22.0-0.nightly-2026-03-15-203841`
+- Full pullspecs also supported
 
 **Troubleshooting:**
 - If `oc adm release extract` fails, the version may not exist
 - Verify version exists: `oc adm release info quay.io/openshift-release-dev/ocp-release:X.Y.Z-x86_64`
 - Use `--verbose` flag to see detailed extraction progress
 - Ensure `oc` CLI is installed and accessible
+- Auto-detection requires `curl` and `jq` for querying release APIs
 
 **Platform:**
 - This script analyzes AWS STS policies only (platform is always 'aws')
 - Works for all AWS-based OpenShift deployments (OSD, ROSA Classic, ROSA HCP)
 
 **Performance:**
+- Auto-detection: 2-5 seconds for version queries
 - First-time extraction: 20-60 seconds per version (network-dependent)
 - Most time spent downloading release image metadata
 
@@ -296,3 +344,4 @@ fi
 - Always cross-check with osdctl when possible
 - Review the raw JSON files in the temp directory if results seem unexpected
 - Compare across multiple version pairs to identify patterns
+- Auto-detected versions include validation (stable→GA, candidate→dev)

@@ -47,8 +47,8 @@ The script runs both analyses and reports if differences exist in either platfor
 ### Step 1: Parse Request
 
 Understand the comparison being requested:
-- Baseline version (e.g., `4.21`)
-- Target version (e.g., `4.22`)
+- Baseline version (default: auto-detect latest stable)
+- Target version (default: auto-detect latest candidate)
 - Specific focus areas (if any)
 
 The analysis automatically covers both AWS STS and GCP WIF platforms.
@@ -56,11 +56,35 @@ The analysis automatically covers both AWS STS and GCP WIF platforms.
 ### Step 2: Use the Orchestrator Script
 
 The `scripts/gap-all.sh` script runs credential policy analysis for both AWS and GCP:
+
+**Auto-detect versions (recommended):**
+```bash
+# Compares latest stable → latest candidate
+./scripts/gap-all.sh
+
+# Use nightly as target
+TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
+```
+
+**Explicit versions:**
 ```bash
 ./scripts/gap-all.sh --baseline 4.21 --target 4.22
+
+# With full version strings
+./scripts/gap-all.sh --baseline 4.21.6 --target 4.22.0-ec.3
+```
+
+**Environment variables:**
+```bash
+# Override versions
+BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 ./scripts/gap-all.sh
+
+# Use nightly
+TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
 ```
 
 The script:
+- Auto-detects versions if not specified (stable → candidate)
 - Runs AWS STS policy analysis
 - Runs GCP WIF policy analysis
 - Exits with code 0 if no differences found in either platform
@@ -68,11 +92,19 @@ The script:
 
 **Use in CI/CD:**
 ```bash
-if ./scripts/gap-all.sh --baseline 4.21 --target 4.22; then
+# Auto-detect versions
+if ./scripts/gap-all.sh; then
   echo "No policy changes in any platform - safe to proceed"
 else
   echo "Policy changes detected - review required"
   exit 1
+fi
+
+# Test against nightly
+if TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh; then
+  echo "No policy changes against nightly"
+else
+  echo "Policy changes detected in nightly - review required"
 fi
 ```
 
@@ -190,11 +222,26 @@ While scripts provide credential policy data, add strategic value:
 
 ## Example Interaction
 
+**User**: "Check if policies changed between latest stable and latest candidate"
+
+**Response**:
+```bash
+# Auto-detect versions
+./scripts/gap-all.sh
+```
+
 **User**: "Check if policies changed between 4.21 and 4.22"
 
 **Response**:
 ```bash
 ./scripts/gap-all.sh --baseline 4.21 --target 4.22
+```
+
+**User**: "Check against latest nightly"
+
+**Response**:
+```bash
+TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
 ```
 
 **If no changes in any platform:**

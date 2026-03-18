@@ -7,6 +7,7 @@ set -euo pipefail
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/common.sh"
+source "${SCRIPT_DIR}/lib/openshift-releases.sh"
 
 # Default values
 VERBOSE=false
@@ -159,22 +160,43 @@ get_sts_policy() {
 # Usage function
 usage() {
     cat <<EOF
-Usage: $0 --baseline <version> --target <version> [OPTIONS]
+Usage: $0 [OPTIONS]
 
 Analyze AWS STS policy gaps between two OpenShift versions.
 Exits with code 0 if no policy differences found, non-zero if differences exist.
 
-Required Arguments:
-  --baseline <version>    Baseline version (e.g., 4.21)
-  --target <version>      Target version to compare (e.g., 4.22)
-
 Optional Arguments:
+  --baseline <version>    Baseline version (default: auto-detect from latest stable)
+  --target <version>      Target version (default: auto-detect from latest candidate)
   --verbose               Enable verbose logging
   -h, --help              Show this help message
 
+Environment Variables:
+  BASE_VERSION           Override baseline version (lower precedence than --baseline)
+  TARGET_VERSION         Override target version (lower precedence than --target)
+                         Special values: NIGHTLY (dev nightly), CANDIDATE (dev candidate)
+
+Version Resolution Precedence (highest to lowest):
+  1. Command-line flags (--baseline, --target)
+  2. Environment variables (BASE_VERSION, TARGET_VERSION)
+  3. Auto-detected (latest stable for baseline, latest candidate for target)
+
 Examples:
+  # Auto-detect versions (stable → candidate)
+  $0
+
+  # Explicit versions via CLI
   $0 --baseline 4.21 --target 4.22
-  $0 --baseline 4.21.0 --target 4.22.0 --verbose
+  $0 --baseline 4.21.6 --target 4.22.0-ec.3 --verbose
+
+  # Using environment variables
+  BASE_VERSION=4.21.5 TARGET_VERSION=4.22.0-ec.2 $0
+
+  # Use nightly as target
+  TARGET_VERSION=NIGHTLY $0
+
+  # Use candidate as target (explicit)
+  TARGET_VERSION=CANDIDATE $0
 
 Exit Codes:
   0 - No policy differences found
@@ -214,17 +236,64 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate required arguments
-if [[ -z "$BASELINE" ]] || [[ -z "$TARGET" ]]; then
-    log_error "Missing required arguments"
-    usage
+# Resolve baseline version with precedence: CLI > ENV > Auto-detect
+BASELINE_PULLSPEC=""
+if [[ -n "$BASELINE" ]]; then
+    log_info "Using baseline version from CLI: $BASELINE"
+elif [[ -n "${BASE_VERSION:-}" ]]; then
+    BASELINE="$BASE_VERSION"
+    log_info "Using baseline version from BASE_VERSION env: $BASELINE"
+else
+    log_info "Auto-detecting baseline version from latest stable..."
+    BASELINE=$(get_latest_stable_version)
+    BASELINE_PULLSPEC=$(get_latest_stable_pullspec)
+    log_info "Auto-detected baseline version: $BASELINE"
+    log_info "Auto-detected baseline pullspec: $BASELINE_PULLSPEC"
+fi
+
+# Resolve target version with precedence: CLI > ENV > Auto-detect
+TARGET_PULLSPEC=""
+if [[ -n "$TARGET" ]]; then
+    log_info "Using target version from CLI: $TARGET"
+elif [[ -n "${TARGET_VERSION:-}" ]]; then
+    # Check if TARGET_VERSION is a special keyword
+    if [[ "${TARGET_VERSION^^}" == "NIGHTLY" ]]; then
+        log_info "TARGET_VERSION=NIGHTLY detected, using latest dev nightly..."
+        TARGET=$(get_latest_dev_nightly_version)
+        TARGET_PULLSPEC=$(get_latest_dev_nightly_pullspec)
+        log_info "Auto-detected nightly target version: $TARGET"
+        log_info "Auto-detected nightly target pullspec: $TARGET_PULLSPEC"
+    elif [[ "${TARGET_VERSION^^}" == "CANDIDATE" ]]; then
+        log_info "TARGET_VERSION=CANDIDATE detected, using latest candidate..."
+        TARGET=$(get_latest_candidate_version)
+        TARGET_PULLSPEC=$(get_latest_candidate_pullspec)
+        log_info "Auto-detected candidate target version: $TARGET"
+        log_info "Auto-detected candidate target pullspec: $TARGET_PULLSPEC"
+    else
+        TARGET="$TARGET_VERSION"
+        log_info "Using target version from TARGET_VERSION env: $TARGET"
+    fi
+else
+    log_info "Auto-detecting target version from latest candidate..."
+    TARGET=$(get_latest_candidate_version)
+    TARGET_PULLSPEC=$(get_latest_candidate_pullspec)
+    log_info "Auto-detected target version: $TARGET"
+    log_info "Auto-detected target pullspec: $TARGET_PULLSPEC"
 fi
 
 # Main execution
 main() {
     log_info "Starting AWS STS Policy Gap Analysis"
+    log_info "========================================="
     log_info "Baseline version: $BASELINE"
+    if [[ -n "$BASELINE_PULLSPEC" ]]; then
+        log_info "Baseline pullspec: $BASELINE_PULLSPEC"
+    fi
     log_info "Target version: $TARGET"
+    if [[ -n "$TARGET_PULLSPEC" ]]; then
+        log_info "Target pullspec: $TARGET_PULLSPEC"
+    fi
+    log_info "========================================="
 
     # Check prerequisites
     check_command jq
@@ -241,12 +310,16 @@ main() {
     # Step 1: Fetch baseline STS policy
     log_info "Fetching baseline STS policy..."
     baseline_policy="${TEMP_DIR}/${BASELINE}-aws-sts.json"
-    get_sts_policy "$BASELINE" > "$baseline_policy"
+    # Use pullspec if available, otherwise use version string
+    baseline_ref="${BASELINE_PULLSPEC:-$BASELINE}"
+    get_sts_policy "$baseline_ref" > "$baseline_policy"
 
     # Step 2: Fetch target STS policy
     log_info "Fetching target STS policy..."
     target_policy="${TEMP_DIR}/${TARGET}-aws-sts.json"
-    get_sts_policy "$TARGET" > "$target_policy"
+    # Use pullspec if available, otherwise use version string
+    target_ref="${TARGET_PULLSPEC:-$TARGET}"
+    get_sts_policy "$target_ref" > "$target_policy"
 
     # Step 3: Compare policies
     log_info "Comparing STS policies..."

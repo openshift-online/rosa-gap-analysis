@@ -16,6 +16,7 @@ The `Containerfile` defines a container image with all the tools required to run
 | **Python 3** | System package | Run `parse-credentials-request.py` helper script |
 | **PyYAML** | System package | Python YAML parsing library |
 | **bash** | System package | Execute gap analysis shell scripts |
+| **Gap Analysis Scripts** | Latest from repo | Pre-installed scripts for gap analysis workflows |
 
 ### Why These Tools?
 
@@ -23,6 +24,7 @@ The `Containerfile` defines a container image with all the tools required to run
 - **jq**: Processes and compares IAM/WIF policy JSON documents, extracts action-level differences
 - **yq**: Alternative YAML parser (preferred over Python for performance)
 - **Python 3 + PyYAML**: Fallback YAML parser used by `scripts/lib/parse-credentials-request.py`
+- **Gap Analysis Scripts**: Pre-installed in `/gap-analysis/scripts/` and added to PATH for direct execution
 
 ## Base Image
 
@@ -63,20 +65,25 @@ podman build -f ci/Containerfile -t rosa-gap-analysis:latest .
 ### Test the Image
 
 ```bash
-# Run gap analysis in the container
+# Run gap analysis in the container (scripts are pre-installed)
 podman run --rm rosa-gap-analysis:latest \
-  bash -c "
-    git clone git@github.com:openshift-online/rosa-gap-analysis.git /workspace &&
-    cd /workspace &&
-    ./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22
-  "
+  gap-aws-sts.sh --baseline 4.21 --target 4.22
+
+# Or with full path
+podman run --rm rosa-gap-analysis:latest \
+  /gap-analysis/scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22
+
+# Run all gap analyses
+podman run --rm rosa-gap-analysis:latest \
+  gap-all.sh --baseline 4.21 --target 4.22
 
 # Verify all tools are available
 podman run --rm rosa-gap-analysis:latest bash -c "
   oc version --client &&
   jq --version &&
   yq --version &&
-  python3 --version
+  python3 --version &&
+  gap-aws-sts.sh --help
 "
 ```
 
@@ -93,16 +100,33 @@ build_root:
 tests:
 - as: gap-analysis-aws
   commands: |
-    ./scripts/gap-aws-sts.sh --baseline 4.21 --target 4.22
+    # Scripts are pre-installed and in PATH
+    gap-aws-sts.sh --baseline 4.21 --target 4.22
+  container:
+    from: src
+
+- as: gap-analysis-all
+  commands: |
+    # Run all gap analyses (AWS STS and GCP WIF)
+    gap-all.sh --baseline 4.21 --target 4.22
+  container:
+    from: src
+
+- as: gap-analysis-nightly
+  commands: |
+    # Test against latest nightly
+    TARGET_VERSION=NIGHTLY gap-all.sh
   container:
     from: src
 ```
 
 The CI system:
-1. Builds this Containerfile as the build root
-2. Clones the gap-analysis repository into the container
+1. Builds this Containerfile as the build root (includes scripts)
+2. Scripts are pre-installed in `/gap-analysis/scripts/` and available in PATH
 3. Runs test commands (gap analysis scripts)
 4. Reports results based on exit codes (0 = pass, 1 = fail)
+
+**Note**: Scripts are baked into the image, so no need to clone the repository or mount volumes during test execution.
 
 ## Updating Tool Versions
 
@@ -127,6 +151,28 @@ Check latest releases: https://github.com/mikefarah/yq/releases
 1. Build image locally with changes
 2. Run all gap analysis scripts in container
 3. Verify CI jobs pass before merging
+
+## Container Image Structure
+
+The container image has the following structure:
+
+```
+/gap-analysis/                    # Working directory (WORKDIR)
+├── scripts/                      # Gap analysis scripts (copied from repo)
+│   ├── gap-all.sh               # Orchestrator script
+│   ├── gap-aws-sts.sh           # AWS STS gap analysis
+│   ├── gap-gcp-wif.sh           # GCP WIF gap analysis
+│   └── lib/                     # Shared libraries
+│       ├── common.sh            # Utilities
+│       └── openshift-releases.sh # Version query library
+```
+
+**PATH Configuration**:
+- `/gap-analysis/scripts/` is added to PATH
+- `/gap-analysis/scripts/lib/` is added to PATH
+- Scripts can be executed directly by name: `gap-all.sh`, `gap-aws-sts.sh`, etc.
+
+**Working Directory**: `/gap-analysis`
 
 ## Related Documentation
 

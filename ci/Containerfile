@@ -49,12 +49,8 @@ ENV XDG_CACHE_HOME=/tmp/.cache
 # Set working directory for gap analysis scripts
 WORKDIR /gap-analysis
 
-# Copy gap analysis scripts into the image
+# Copy gap analysis scripts into the image (preserves permissions)
 COPY scripts/ /gap-analysis/scripts/
-
-# Make all scripts executable
-RUN chmod +x /gap-analysis/scripts/*.sh && \
-    chmod +x /gap-analysis/scripts/lib/*.sh 2>/dev/null || true
 
 # Add scripts to PATH for convenience
 ENV PATH="/gap-analysis/scripts:/gap-analysis/scripts/lib:${PATH}"

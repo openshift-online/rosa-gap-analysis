@@ -14,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from reporters import generate_markdown_report, generate_html_report, generate_json_report
 from common import log_info, log_success
+from openshift_releases import extract_minor_version
 
 
 def find_latest_reports(baseline, target, report_dir='reports'):
@@ -36,8 +37,10 @@ def find_latest_reports(baseline, target, report_dir='reports'):
     if gcp_files:
         reports['gcp_wif'] = gcp_files[-1]  # Latest
 
-    # Find Feature Gates report
-    fg_pattern = os.path.join(report_dir, f"gap-analysis-feature-gates_{baseline}_to_{target}_*.json")
+    # Find Feature Gates report (uses minor versions)
+    baseline_minor = extract_minor_version(baseline)
+    target_minor = extract_minor_version(target)
+    fg_pattern = os.path.join(report_dir, f"gap-analysis-feature-gates_{baseline_minor}_to_{target_minor}_*.json")
     fg_files = sorted(glob.glob(fg_pattern))
     if fg_files:
         reports['feature_gates'] = fg_files[-1]  # Latest

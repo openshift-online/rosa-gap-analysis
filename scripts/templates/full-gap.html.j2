@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ type }} Report</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #444;
+            margin-top: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 8px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 20px;
+        }
+        .metadata {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .metadata p {
+            margin: 5px 0;
+        }
+        .summary-card {
+            display: inline-block;
+            margin: 10px;
+            padding: 20px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            border-left: 4px solid #0066cc;
+        }
+        .summary-card.success {
+            background-color: #e8f5e9;
+            border-left-color: #4caf50;
+        }
+        .summary-card.warning {
+            background-color: #fff3e0;
+            border-left-color: #ff9800;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #0066cc;
+            color: white;
+            font-weight: 600;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .added {
+            color: #4caf50;
+            font-weight: 500;
+        }
+        .removed {
+            color: #f44336;
+            font-weight: 500;
+        }
+        .changed {
+            color: #ff9800;
+            font-weight: 500;
+        }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ type }} Report</h1>
+
+        <div class="metadata">
+            <p><strong>Generated:</strong> {{ timestamp }}</p>
+            <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code></p>
+            <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
+        </div>
+
+        <h2>Summary</h2>
+
+        <div style="display: flex; flex-wrap: wrap;">
+            {% if aws_sts %}
+            {% set aws_total = (aws_sts.comparison.actions.target_only|length) + (aws_sts.comparison.actions.baseline_only|length) %}
+            <div class="summary-card {{ 'success' if aws_total == 0 else 'warning' }}">
+                <h3>AWS STS</h3>
+                <p><strong>Added:</strong> {{ aws_sts.comparison.actions.target_only|length }}</p>
+                <p><strong>Removed:</strong> {{ aws_sts.comparison.actions.baseline_only|length }}</p>
+            </div>
+            {% endif %}
+
+            {% if gcp_wif %}
+            {% set gcp_total = (gcp_wif.comparison.actions.target_only|length) + (gcp_wif.comparison.actions.baseline_only|length) %}
+            <div class="summary-card {{ 'success' if gcp_total == 0 else 'warning' }}">
+                <h3>GCP WIF</h3>
+                <p><strong>Added:</strong> {{ gcp_wif.comparison.actions.target_only|length }}</p>
+                <p><strong>Removed:</strong> {{ gcp_wif.comparison.actions.baseline_only|length }}</p>
+            </div>
+            {% endif %}
+
+            {% if feature_gates %}
+            {% set fg_total = (feature_gates.comparison.added|length) + (feature_gates.comparison.removed|length) + (feature_gates.comparison.newly_enabled_by_default|length) %}
+            <div class="summary-card {{ 'success' if fg_total == 0 else 'warning' }}">
+                <h3>Feature Gates</h3>
+                <p><strong>New:</strong> {{ feature_gates.comparison.added|length }}</p>
+                <p><strong>Removed:</strong> {{ feature_gates.comparison.removed|length }}</p>
+                <p><strong>Newly Default:</strong> {{ feature_gates.comparison.newly_enabled_by_default|length }}</p>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if aws_sts and (aws_sts.comparison.actions.target_only or aws_sts.comparison.actions.baseline_only) %}
+        <h2>AWS STS Policy Details</h2>
+
+        {% if aws_sts.comparison.actions.target_only %}
+        <h3>Added Permissions</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Permission</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in aws_sts.comparison.actions.target_only %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="added">✅ Added</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if aws_sts.comparison.actions.baseline_only %}
+        <h3>Removed Permissions</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Permission</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in aws_sts.comparison.actions.baseline_only %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="removed">❌ Removed</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endif %}
+
+        {% if gcp_wif and (gcp_wif.comparison.actions.target_only or gcp_wif.comparison.actions.baseline_only) %}
+        <h2>GCP WIF Policy Details</h2>
+
+        {% if gcp_wif.comparison.actions.target_only %}
+        <h3>Added Permissions</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Permission</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in gcp_wif.comparison.actions.target_only %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="added">✅ Added</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if gcp_wif.comparison.actions.baseline_only %}
+        <h3>Removed Permissions</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Permission</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in gcp_wif.comparison.actions.baseline_only %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="removed">❌ Removed</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endif %}
+
+        {% if feature_gates %}
+        {% set has_changes = feature_gates.comparison.added or feature_gates.comparison.removed or feature_gates.comparison.newly_enabled_by_default or feature_gates.comparison.removed_from_default %}
+        {% if has_changes %}
+        <h2>Feature Gate Details</h2>
+
+        {% if feature_gates.comparison.added %}
+        <h3>New Feature Gates</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in feature_gates.comparison.added %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="added">➕ New</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if feature_gates.comparison.newly_enabled_by_default %}
+        <h3>Newly Enabled by Default</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in feature_gates.comparison.newly_enabled_by_default %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="changed">⭐ Promoted to Default</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if feature_gates.comparison.removed %}
+        <h3>Removed Feature Gates</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in feature_gates.comparison.removed %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="removed">➖ Removed</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if feature_gates.comparison.removed_from_default %}
+        <h3>Removed from Default</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in feature_gates.comparison.removed_from_default %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="removed">⚠️ Removed from Default</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endif %}
+        {% endif %}
+
+        <div class="footer">
+            Generated by OpenShift Gap Analysis Tools
+        </div>
+    </div>
+</body>
+</html>

@@ -1,0 +1,36 @@
+# {{ type }} Report
+
+**Generated:** {{ timestamp }}
+**Baseline Version:** {{ baseline }}
+**Target Version:** {{ target }}
+
+---
+
+## Summary
+
+### Changes Detected
+
+- **Added Actions:** {{ comparison.actions.target_only|length }}
+- **Removed Actions:** {{ comparison.actions.baseline_only|length }}
+- **Total Changes:** {{ (comparison.actions.target_only|length) + (comparison.actions.baseline_only|length) }}
+
+{% if comparison.actions.target_only %}
+### Added Actions
+
+{% for action in comparison.actions.target_only %}
+- ✅ `{{ action }}`
+{% endfor %}
+
+{% endif %}
+{% if comparison.actions.baseline_only %}
+### Removed Actions
+
+{% for action in comparison.actions.baseline_only %}
+- ❌ `{{ action }}`
+{% endfor %}
+
+{% endif %}
+{% if not comparison.actions.target_only and not comparison.actions.baseline_only %}
+**✅ No policy differences detected**
+
+{% endif %}

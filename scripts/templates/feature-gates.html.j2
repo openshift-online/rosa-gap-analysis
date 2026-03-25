@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ type }} Report</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #444;
+            margin-top: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 8px;
+        }
+        h3 {
+            color: #555;
+            margin-top: 20px;
+        }
+        .metadata {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        .metadata p {
+            margin: 5px 0;
+        }
+        .summary-card {
+            display: inline-block;
+            margin: 10px;
+            padding: 20px;
+            background-color: #e3f2fd;
+            border-radius: 5px;
+            border-left: 4px solid #0066cc;
+        }
+        .summary-card.success {
+            background-color: #e8f5e9;
+            border-left-color: #4caf50;
+        }
+        .summary-card.warning {
+            background-color: #fff3e0;
+            border-left-color: #ff9800;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #0066cc;
+            color: white;
+            font-weight: 600;
+        }
+        tr:hover {
+            background-color: #f5f5f5;
+        }
+        .added {
+            color: #4caf50;
+            font-weight: 500;
+        }
+        .removed {
+            color: #f44336;
+            font-weight: 500;
+        }
+        .changed {
+            color: #ff9800;
+            font-weight: 500;
+        }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ type }} Report</h1>
+
+        <div class="metadata">
+            <p><strong>Generated:</strong> {{ timestamp }}</p>
+            <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code></p>
+            <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
+        </div>
+
+        <h2>Summary</h2>
+
+        {% set total_changes = (comparison.added|length) + (comparison.removed|length) + (comparison.newly_enabled_by_default|length) + (comparison.removed_from_default|length) %}
+        {% if total_changes == 0 %}
+        <div class="summary-card success">
+            <h3>✅ No Differences</h3>
+            <p>
+                <strong>New:</strong> 0 |
+                <strong>Removed:</strong> 0 |
+                <strong>Newly Default:</strong> 0
+            </p>
+        </div>
+        {% else %}
+        <div class="summary-card warning">
+            <h3>⚠️ {{ total_changes }} Changes Detected</h3>
+            <p>
+                <strong>New:</strong> {{ comparison.added|length }} |
+                <strong>Removed:</strong> {{ comparison.removed|length }} |
+                <strong>Newly Default:</strong> {{ comparison.newly_enabled_by_default|length }}
+            </p>
+        </div>
+        {% endif %}
+
+        {% if comparison.added or comparison.removed or comparison.newly_enabled_by_default or comparison.removed_from_default %}
+        <h2>Details</h2>
+        {% endif %}
+
+        {% if comparison.added %}
+        <h3>New Feature Gates</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in comparison.added %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="added">➕ New</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if comparison.newly_enabled_by_default %}
+        <h3>Newly Enabled by Default</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in comparison.newly_enabled_by_default %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="changed">⭐ Promoted to Default</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if comparison.removed %}
+        <h3>Removed Feature Gates</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in comparison.removed %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="removed">➖ Removed</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if comparison.removed_from_default %}
+        <h3>Removed from Default</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in comparison.removed_from_default %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="removed">⚠️ Removed from Default</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        <div class="footer">
+            Generated by OpenShift Gap Analysis Tools
+        </div>
+    </div>
+</body>
+</html>

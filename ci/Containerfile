@@ -23,6 +23,9 @@ RUN dnf install --allowerasing -y \
         coreutils \
     && dnf clean all
 
+# Install Python packages
+RUN pip3 install --no-cache-dir Jinja2>=3.1.0
+
 # Install yq (YAML processor - recommended for parsing CredentialsRequests)
 RUN arch=$(uname -m) && \
     case "${arch}" in \
@@ -63,4 +66,5 @@ RUN echo "Verifying tool installations..." && \
     oc version --client && \
     python3 --version && \
     python3 -c "import yaml; print('PyYAML available')" && \
+    python3 -c "import jinja2; print('Jinja2 available')" && \
     echo "All tools verified successfully"

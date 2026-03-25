@@ -150,6 +150,9 @@ main() {
     local gcp_output=""
     local feature_gates_output=""
 
+    # Set environment variable to skip individual reports (full report will be generated instead)
+    export GAP_FULL_REPORT=1
+
     # Run AWS STS analysis
     log_info ""
     log_info "Running AWS STS Policy Gap Analysis..."

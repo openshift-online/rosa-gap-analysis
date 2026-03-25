@@ -1,0 +1,8 @@
+# Python dependencies for OpenShift Gap Analysis scripts
+# Install with: pip install -r requirements.txt
+
+# YAML parsing for CredentialsRequest manifests
+PyYAML>=6.0
+
+# Template engine for report generation
+Jinja2>=3.1.0

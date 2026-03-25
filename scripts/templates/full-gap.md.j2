@@ -1,0 +1,100 @@
+# {{ type }} Report
+
+**Generated:** {{ timestamp }}
+**Baseline Version:** {{ baseline }}
+**Target Version:** {{ target }}
+
+---
+
+## Summary
+
+### Platform Analysis Results
+
+{% if aws_sts %}
+#### AWS STS Policies
+
+**Summary:** {{ aws_sts.comparison.actions.target_only|length }} added, {{ aws_sts.comparison.actions.baseline_only|length }} removed
+
+{% if aws_sts.comparison.actions.target_only %}
+**Added Permissions:**
+{% for action in aws_sts.comparison.actions.target_only %}
+- ✅ `{{ action }}`
+{% endfor %}
+
+{% endif %}
+{% if aws_sts.comparison.actions.baseline_only %}
+**Removed Permissions:**
+{% for action in aws_sts.comparison.actions.baseline_only %}
+- ❌ `{{ action }}`
+{% endfor %}
+
+{% endif %}
+{% if not aws_sts.comparison.actions.target_only and not aws_sts.comparison.actions.baseline_only %}
+✅ No policy differences detected
+
+{% endif %}
+{% endif %}
+
+{% if gcp_wif %}
+#### GCP WIF Policies
+
+**Summary:** {{ gcp_wif.comparison.actions.target_only|length }} added, {{ gcp_wif.comparison.actions.baseline_only|length }} removed
+
+{% if gcp_wif.comparison.actions.target_only %}
+**Added Permissions:**
+{% for action in gcp_wif.comparison.actions.target_only %}
+- ✅ `{{ action }}`
+{% endfor %}
+
+{% endif %}
+{% if gcp_wif.comparison.actions.baseline_only %}
+**Removed Permissions:**
+{% for action in gcp_wif.comparison.actions.baseline_only %}
+- ❌ `{{ action }}`
+{% endfor %}
+
+{% endif %}
+{% if not gcp_wif.comparison.actions.target_only and not gcp_wif.comparison.actions.baseline_only %}
+✅ No policy differences detected
+
+{% endif %}
+{% endif %}
+
+{% if feature_gates %}
+#### Feature Gates
+
+**Summary:** {{ feature_gates.comparison.added|length }} new, {{ feature_gates.comparison.removed|length }} removed, {{ feature_gates.comparison.newly_enabled_by_default|length }} newly default
+
+{% if feature_gates.comparison.added %}
+**New Feature Gates:**
+{% for gate in feature_gates.comparison.added %}
+- ➕ `{{ gate }}`
+{% endfor %}
+
+{% endif %}
+{% if feature_gates.comparison.newly_enabled_by_default %}
+**Newly Enabled by Default:**
+{% for gate in feature_gates.comparison.newly_enabled_by_default %}
+- ⭐ `{{ gate }}`
+{% endfor %}
+
+{% endif %}
+{% if feature_gates.comparison.removed %}
+**Removed Feature Gates:**
+{% for gate in feature_gates.comparison.removed %}
+- ➖ `{{ gate }}`
+{% endfor %}
+
+{% endif %}
+{% if feature_gates.comparison.removed_from_default %}
+**Removed from Default:**
+{% for gate in feature_gates.comparison.removed_from_default %}
+- ⚠️ `{{ gate }}`
+{% endfor %}
+
+{% endif %}
+{% if not feature_gates.comparison.added and not feature_gates.comparison.removed and not feature_gates.comparison.newly_enabled_by_default and not feature_gates.comparison.removed_from_default %}
+✅ No feature gate differences detected
+
+{% endif %}
+{% endif %}

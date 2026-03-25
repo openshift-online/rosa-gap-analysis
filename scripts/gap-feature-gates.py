@@ -227,20 +227,24 @@ Exit Codes:
         }
     }
 
-    # Generate Markdown report
-    md_file = os.path.join(report_dir, f"gap-analysis-feature-gates_{baseline}_to_{target}_{timestamp}.md")
-    generate_markdown_report(report_data, md_file)
-    log_info(f"Markdown report generated: {md_file}")
-
-    # Generate HTML report
-    html_file = os.path.join(report_dir, f"gap-analysis-feature-gates_{baseline}_to_{target}_{timestamp}.html")
-    generate_html_report(report_data, html_file)
-    log_info(f"HTML report generated: {html_file}")
-
-    # Generate JSON report
+    # Always generate JSON report (needed for combined report)
     json_file = os.path.join(report_dir, f"gap-analysis-feature-gates_{baseline}_to_{target}_{timestamp}.json")
     generate_json_report(report_data, json_file)
     log_info(f"JSON report generated: {json_file}")
+
+    # Skip Markdown and HTML reports if GAP_FULL_REPORT is set (full report will include these)
+    if os.environ.get('GAP_FULL_REPORT'):
+        log_info("Skipping Markdown/HTML reports (full report will be generated)")
+    else:
+        # Generate Markdown report
+        md_file = os.path.join(report_dir, f"gap-analysis-feature-gates_{baseline}_to_{target}_{timestamp}.md")
+        generate_markdown_report(report_data, md_file)
+        log_info(f"Markdown report generated: {md_file}")
+
+        # Generate HTML report
+        html_file = os.path.join(report_dir, f"gap-analysis-feature-gates_{baseline}_to_{target}_{timestamp}.html")
+        generate_html_report(report_data, html_file)
+        log_info(f"HTML report generated: {html_file}")
 
     # Always exit 0 on successful completion
     sys.exit(0)

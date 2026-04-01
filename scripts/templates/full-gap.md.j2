@@ -102,7 +102,7 @@
 {% if ocp_gate_ack %}
 #### OCP Admin Gate Acknowledgments
 
-**Summary:** {% if ocp_gate_ack.summary.upgrade_ready %}✅ UPGRADE READY{% else %}❌ UPGRADE NOT READY{% endif %} - {{ ocp_gate_ack.summary.gates_requiring_ack }} gates requiring acknowledgment
+**Summary:** {% if ocp_gate_ack.summary.ack_file_missing %}⚠️ WARNING{% elif ocp_gate_ack.summary.upgrade_ready %}✅ UPGRADE READY{% else %}❌ UPGRADE NOT READY{% endif %} - {{ ocp_gate_ack.summary.gates_requiring_ack }} gates requiring acknowledgment
 
 {% if ocp_gate_ack.summary.gates_requiring_ack == 0 %}
 ✅ No admin gates in baseline version, no acknowledgments required

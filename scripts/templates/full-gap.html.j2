@@ -147,9 +147,14 @@
             {% endif %}
 
             {% if ocp_gate_ack %}
-            <div class="summary-card {{ 'success' if ocp_gate_ack.summary.upgrade_ready else 'warning' }}">
+            <div class="summary-card {{ 'warning' if ocp_gate_ack.summary.ack_file_missing else ('success' if ocp_gate_ack.summary.upgrade_ready else 'warning') }}">
                 <h3>OCP Admin Gates</h3>
-                <p><strong>Status:</strong> {% if ocp_gate_ack.summary.upgrade_ready %}✅ Ready{% else %}❌ Not Ready{% endif %}</p>
+                <p><strong>Status:</strong>
+                    {% if ocp_gate_ack.summary.ack_file_missing %}⚠️ Warning
+                    {% elif ocp_gate_ack.summary.upgrade_ready %}✅ Ready
+                    {% else %}❌ Not Ready
+                    {% endif %}
+                </p>
                 <p><strong>Requiring Ack:</strong> {{ ocp_gate_ack.summary.gates_requiring_ack }}</p>
                 <p><strong>Unacknowledged:</strong> {{ ocp_gate_ack.summary.unacknowledged }}</p>
             </div>

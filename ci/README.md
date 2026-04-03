@@ -217,6 +217,84 @@ The container image has the following structure:
 - Override with `--report-dir` flag or `REPORT_DIR` environment variable
 - Reports include MD (human-readable), HTML (web-viewable), and JSON (machine-readable) formats
 
+## Manually Triggering Prow Jobs
+
+The `run-prow-job.sh` script allows you to manually trigger and monitor OpenShift CI Prow jobs via the Gangway API.
+
+### Prerequisites
+
+1. **Required tools**: `oc`, `jq`, `curl`
+2. **Authentication**: Authenticate to OpenShift CI cluster at:
+   ```
+   https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/display
+   ```
+
+### Usage
+
+```bash
+./run-prow-job.sh [OPTIONS]
+```
+
+**Options:**
+- `-j, --job-name NAME` - Specify the Prow job name to trigger (default: `periodic-ci-openshift-online-rosa-gap-analysis-main-nightly`)
+- `-w, --wait` - Wait and poll for job completion with status updates
+- `-h, --help` - Display help message
+
+### Examples
+
+**Trigger the default nightly job:**
+```bash
+./run-prow-job.sh
+```
+
+**Trigger and wait for completion:**
+```bash
+./run-prow-job.sh -w
+```
+
+**Trigger a specific job:**
+```bash
+./run-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
+```
+
+**Trigger a specific job and monitor until completion:**
+```bash
+./run-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly -w
+```
+
+### Output
+
+**Without `-w` flag:**
+- Displays job ID and initial job status as JSON
+
+**With `-w` flag:**
+- Polls job status every 30 seconds
+- Shows timestamped status updates:
+  ```
+  [INFO] 14:23:05 Job is starting (TRIGGERED)
+  [INFO] 14:23:35 Job is running (PENDING)
+  [INFO] 14:24:05 Job is running (PENDING)
+  [INFO] 14:28:45 Job completed successfully!
+  ```
+- Displays final JSON payload when job completes or fails
+
+### Job Status Values
+
+- **TRIGGERED** - Job has been triggered and is initializing
+- **PENDING** - Job is actively running (working on backend)
+- **SUCCESS** - Job completed successfully
+- **FAILURE** - Job failed
+- **ERROR** - Job encountered an error
+- **ABORTED** - Job was aborted
+
+### Error Handling
+
+The script validates:
+- Required dependencies (oc, jq, curl)
+- Authentication status
+- API response codes and error messages
+- Job name existence (returns meaningful error for non-existent jobs)
+
 ## Related Documentation
 
 - [Gap Analysis Scripts](../scripts/) - Scripts that run inside this container

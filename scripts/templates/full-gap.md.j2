@@ -11,7 +11,27 @@
 ### Platform Analysis Results
 
 {% if aws_sts %}
-#### AWS STS Policies
+#### AWS STS Policy Diff
+
+**Status:** {% if (aws_sts.comparison.actions.target_only|length) + (aws_sts.comparison.actions.baseline_only|length) == 0 %}✅ No Changes{% else %}⚠️ {{ aws_sts.comparison.actions.target_only|length }} added, {{ aws_sts.comparison.actions.baseline_only|length }} removed{% endif %}
+
+#### AWS STS Admin Acknowledgment
+
+**Status:** {% if aws_sts.validation_result == 'PASS' %}✅ PASS{% else %}❌ FAIL{% endif %}
+
+{% if aws_sts.validation_result == 'FAIL' %}
+**Failure Reasons:**
+{% if aws_sts.validation_details.check_1_resources.status == 'FAIL' %}
+- Resources validation failed{% if aws_sts.validation_details.check_1_resources.errors %}: {{ aws_sts.validation_details.check_1_resources.errors[0] }}{% endif %}
+{% endif %}
+{% if aws_sts.validation_details.check_2_admin_ack.status == 'FAIL' %}
+- Admin acknowledgment validation failed{% if aws_sts.validation_details.check_2_admin_ack.errors %}: {{ aws_sts.validation_details.check_2_admin_ack.errors[0] }}{% endif %}
+{% endif %}
+{% endif %}
+
+---
+
+#### Details
 
 **Summary:** {{ aws_sts.comparison.actions.target_only|length }} added, {{ aws_sts.comparison.actions.baseline_only|length }} removed
 
@@ -21,6 +41,18 @@
 - ✅ `{{ action }}`
 {% endfor %}
 
+{% endif %}
+{% if aws_sts.comparison.file_changes %}
+**Changed Files:**
+
+{% for file_info in aws_sts.comparison.file_changes %}
+- **{{ file_info.filename }}**: {{ file_info.actions_added_count }} added, {{ file_info.actions_removed_count }} removed
+{% endfor %}
+
+{% if aws_sts.validation_details and aws_sts.validation_details.check_1_resources and aws_sts.validation_details.check_1_resources.status == 'FAIL' %}
+> **Note:** managed-cluster-config validation failed. The changes shown above are expected but may be missing in managed-cluster-config.
+
+{% endif %}
 {% endif %}
 {% if aws_sts.comparison.actions.baseline_only %}
 **Removed Permissions:**
@@ -36,7 +68,27 @@
 {% endif %}
 
 {% if gcp_wif %}
-#### GCP WIF Policies
+#### GCP WIF Policy Diff
+
+**Status:** {% if (gcp_wif.comparison.actions.target_only|length) + (gcp_wif.comparison.actions.baseline_only|length) == 0 %}✅ No Changes{% else %}⚠️ {{ gcp_wif.comparison.actions.target_only|length }} added, {{ gcp_wif.comparison.actions.baseline_only|length }} removed{% endif %}
+
+#### GCP WIF Admin Acknowledgment
+
+**Status:** {% if gcp_wif.validation_result == 'PASS' %}✅ PASS{% else %}❌ FAIL{% endif %}
+
+{% if gcp_wif.validation_result == 'FAIL' %}
+**Failure Reasons:**
+{% if gcp_wif.validation_details.check_1_resources.status == 'FAIL' %}
+- Resources validation failed{% if gcp_wif.validation_details.check_1_resources.errors %}: {{ gcp_wif.validation_details.check_1_resources.errors[0] }}{% endif %}
+{% endif %}
+{% if gcp_wif.validation_details.check_2_admin_ack.status == 'FAIL' %}
+- Admin acknowledgment validation failed{% if gcp_wif.validation_details.check_2_admin_ack.errors %}: {{ gcp_wif.validation_details.check_2_admin_ack.errors[0] }}{% endif %}
+{% endif %}
+{% endif %}
+
+---
+
+#### Details
 
 **Summary:** {{ gcp_wif.comparison.actions.target_only|length }} added, {{ gcp_wif.comparison.actions.baseline_only|length }} removed
 
@@ -46,6 +98,18 @@
 - ✅ `{{ action }}`
 {% endfor %}
 
+{% endif %}
+{% if gcp_wif.comparison.file_changes %}
+**Changed Files:**
+
+{% for file_info in gcp_wif.comparison.file_changes %}
+- **{{ file_info.filename }}**: {{ file_info.permissions_added_count }} added, {{ file_info.permissions_removed_count }} removed
+{% endfor %}
+
+{% if gcp_wif.validation_details and gcp_wif.validation_details.check_1_resources and gcp_wif.validation_details.check_1_resources.status == 'FAIL' %}
+> **Note:** managed-cluster-config validation failed. The changes shown above are expected but may be missing in managed-cluster-config.
+
+{% endif %}
 {% endif %}
 {% if gcp_wif.comparison.actions.baseline_only %}
 **Removed Permissions:**
@@ -60,8 +124,65 @@
 {% endif %}
 {% endif %}
 
+{% if ocp_gate_ack %}
+#### OCP Admin Gate Acknowledgments
+
+**Status:** {% if ocp_gate_ack.validation_result == 'PASS' %}✅ PASS{% else %}❌ FAIL{% endif %}
+
+{% if ocp_gate_ack.validation_result == 'FAIL' %}
+**Failure Reasons:**
+{% if ocp_gate_ack.summary.ack_file_missing and ocp_gate_ack.summary.gates_requiring_ack > 0 %}
+- Acknowledgment file missing for version {{ ocp_gate_ack.target }}
+{% endif %}
+{% if ocp_gate_ack.summary.unacknowledged > 0 %}
+- {{ ocp_gate_ack.summary.unacknowledged }} gate(s) not acknowledged
+{% endif %}
+{% if not ocp_gate_ack.config_validation.valid %}
+- config.yaml validation failed{% if ocp_gate_ack.config_validation.errors %}: {{ ocp_gate_ack.config_validation.errors[0] }}{% endif %}
+{% endif %}
+{% endif %}
+
+**Summary:** {{ ocp_gate_ack.summary.gates_requiring_ack }} gates requiring acknowledgment
+
+{% if ocp_gate_ack.summary.gates_requiring_ack == 0 %}
+✅ No admin gates in baseline version, no acknowledgments required
+
+
+{% else %}
+{% if ocp_gate_ack.summary.ack_file_missing %}
+**❌ Acknowledgment File Missing:**
+- Required file: `deploy/osd-cluster-acks/ocp/{{ ocp_gate_ack.target }}/admin-ack.yaml`
+- Action Required: Create the acknowledgment file
+
+{% endif %}
+{% if ocp_gate_ack.analysis.acknowledged_gates %}
+**✅ Acknowledged Gates:**
+{% for gate in ocp_gate_ack.analysis.acknowledged_gates %}
+- ✅ `{{ gate }}`
+{% endfor %}
+
+{% endif %}
+{% if ocp_gate_ack.analysis.unacknowledged_gates %}
+**❌ Unacknowledged Gates:**
+{% for gate in ocp_gate_ack.analysis.unacknowledged_gates %}
+- ❌ `{{ gate }}`
+{% endfor %}
+
+{% endif %}
+{% if ocp_gate_ack.analysis.extra_acks %}
+**ℹ️ Extra Acknowledgments:**
+{% for ack in ocp_gate_ack.analysis.extra_acks %}
+- `{{ ack }}`
+{% endfor %}
+
+{% endif %}
+{% endif %}
+{% endif %}
+
 {% if feature_gates %}
 #### Feature Gates
+
+**Status:** ✅ PASS (Informational)
 
 **Summary:** {{ feature_gates.comparison.added|length }} new, {{ feature_gates.comparison.removed|length }} removed, {{ feature_gates.comparison.newly_enabled_by_default|length }} newly default
 
@@ -96,50 +217,5 @@
 {% if not feature_gates.comparison.added and not feature_gates.comparison.removed and not feature_gates.comparison.newly_enabled_by_default and not feature_gates.comparison.removed_from_default %}
 ✅ No feature gate differences detected
 
-{% endif %}
-{% endif %}
-
-{% if ocp_gate_ack %}
-#### OCP Admin Gate Acknowledgments
-
-**Summary:** {% if ocp_gate_ack.summary.ack_file_missing %}⚠️ WARNING{% elif ocp_gate_ack.summary.upgrade_ready %}✅ UPGRADE READY{% else %}❌ UPGRADE NOT READY{% endif %} - {{ ocp_gate_ack.summary.gates_requiring_ack }} gates requiring acknowledgment
-
-{% if ocp_gate_ack.summary.gates_requiring_ack == 0 %}
-✅ No admin gates in baseline version, no acknowledgments required
-
-{% if ocp_gate_ack.summary.ack_file_missing %}
-⚠️ **WARNING:** Acknowledgment file not found for version **{{ ocp_gate_ack.target }}**
-- Expected file: `deploy/osd-cluster-acks/ocp/{{ ocp_gate_ack.target }}/admin-ack.yaml`
-- Note: No gates currently require acknowledgment, but the file should exist for this version.
-
-{% endif %}
-{% else %}
-{% if ocp_gate_ack.summary.ack_file_missing %}
-**❌ Acknowledgment File Missing:**
-- Required file: `deploy/osd-cluster-acks/ocp/{{ ocp_gate_ack.target }}/admin-ack.yaml`
-- Action Required: Create the acknowledgment file
-
-{% endif %}
-{% if ocp_gate_ack.analysis.acknowledged_gates %}
-**✅ Acknowledged Gates:**
-{% for gate in ocp_gate_ack.analysis.acknowledged_gates %}
-- ✅ `{{ gate }}`
-{% endfor %}
-
-{% endif %}
-{% if ocp_gate_ack.analysis.unacknowledged_gates %}
-**❌ Unacknowledged Gates:**
-{% for gate in ocp_gate_ack.analysis.unacknowledged_gates %}
-- ❌ `{{ gate }}`
-{% endfor %}
-
-{% endif %}
-{% if ocp_gate_ack.analysis.extra_acks %}
-**ℹ️ Extra Acknowledgments:**
-{% for ack in ocp_gate_ack.analysis.extra_acks %}
-- `{{ ack }}`
-{% endfor %}
-
-{% endif %}
 {% endif %}
 {% endif %}

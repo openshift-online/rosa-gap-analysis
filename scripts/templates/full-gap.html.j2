@@ -121,48 +121,97 @@
             {% if aws_sts %}
             {% set aws_total = (aws_sts.comparison.actions.target_only|length) + (aws_sts.comparison.actions.baseline_only|length) %}
             <div class="summary-card {{ 'success' if aws_total == 0 else 'warning' }}">
-                <h3>AWS STS</h3>
-                <p><strong>Added:</strong> {{ aws_sts.comparison.actions.target_only|length }}</p>
-                <p><strong>Removed:</strong> {{ aws_sts.comparison.actions.baseline_only|length }}</p>
+                <h3>AWS STS Policy Diff</h3>
+                <p><strong>Status:</strong> {% if aws_total == 0 %}✅ No Changes{% else %}⚠️ Changes Detected{% endif %}</p>
+                <p><strong>Added:</strong> {{ aws_sts.comparison.actions.target_only|length }} | <strong>Removed:</strong> {{ aws_sts.comparison.actions.baseline_only|length }}</p>
+            </div>
+            <div class="summary-card {{ 'success' if aws_sts.validation_result == 'PASS' else 'warning' }}">
+                <h3>AWS STS Admin Ack</h3>
+                <p><strong>Status:</strong> {% if aws_sts.validation_result == 'PASS' %}✅ PASS{% else %}❌ FAIL{% endif %}</p>
+                {% if aws_sts.validation_result == 'FAIL' %}
+                <p style="font-size: 0.9em; color: #666;">
+                {% if aws_sts.validation_details.check_1_resources.status == 'FAIL' %}
+                Resources validation failed
+                {% elif aws_sts.validation_details.check_2_admin_ack.status == 'FAIL' %}
+                Admin ack validation failed
+                {% endif %}
+                </p>
+                {% endif %}
             </div>
             {% endif %}
 
             {% if gcp_wif %}
             {% set gcp_total = (gcp_wif.comparison.actions.target_only|length) + (gcp_wif.comparison.actions.baseline_only|length) %}
             <div class="summary-card {{ 'success' if gcp_total == 0 else 'warning' }}">
-                <h3>GCP WIF</h3>
-                <p><strong>Added:</strong> {{ gcp_wif.comparison.actions.target_only|length }}</p>
-                <p><strong>Removed:</strong> {{ gcp_wif.comparison.actions.baseline_only|length }}</p>
+                <h3>GCP WIF Policy Diff</h3>
+                <p><strong>Status:</strong> {% if gcp_total == 0 %}✅ No Changes{% else %}⚠️ Changes Detected{% endif %}</p>
+                <p><strong>Added:</strong> {{ gcp_wif.comparison.actions.target_only|length }} | <strong>Removed:</strong> {{ gcp_wif.comparison.actions.baseline_only|length }}</p>
+            </div>
+            <div class="summary-card {{ 'success' if gcp_wif.validation_result == 'PASS' else 'warning' }}">
+                <h3>GCP WIF Admin Ack</h3>
+                <p><strong>Status:</strong> {% if gcp_wif.validation_result == 'PASS' %}✅ PASS{% else %}❌ FAIL{% endif %}</p>
+                {% if gcp_wif.validation_result == 'FAIL' %}
+                <p style="font-size: 0.9em; color: #666;">
+                {% if gcp_wif.validation_details.check_1_resources.status == 'FAIL' %}
+                Resources validation failed
+                {% elif gcp_wif.validation_details.check_2_admin_ack.status == 'FAIL' %}
+                Admin ack validation failed
+                {% endif %}
+                </p>
+                {% endif %}
+            </div>
+            {% endif %}
+
+            {% if ocp_gate_ack %}
+            <div class="summary-card {{ 'success' if ocp_gate_ack.validation_result == 'PASS' else 'warning' }}">
+                <h3>OCP Admin Gates</h3>
+                <p><strong>Status:</strong> {% if ocp_gate_ack.validation_result == 'PASS' %}✅ PASS{% else %}❌ FAIL{% endif %}</p>
+                <p><strong>Requiring Ack:</strong> {{ ocp_gate_ack.summary.gates_requiring_ack }}</p>
+                <p><strong>Unacknowledged:</strong> {{ ocp_gate_ack.summary.unacknowledged }}</p>
+                {% if ocp_gate_ack.validation_result == 'FAIL' %}
+                <p style="font-size: 0.9em; color: #666;">
+                {% if ocp_gate_ack.summary.ack_file_missing and ocp_gate_ack.summary.gates_requiring_ack > 0 %}
+                Ack file missing
+                {% elif ocp_gate_ack.summary.unacknowledged > 0 %}
+                Gates not acknowledged
+                {% elif not ocp_gate_ack.config_validation.valid %}
+                Config validation failed
+                {% endif %}
+                </p>
+                {% endif %}
             </div>
             {% endif %}
 
             {% if feature_gates %}
             {% set fg_total = (feature_gates.comparison.added|length) + (feature_gates.comparison.removed|length) + (feature_gates.comparison.newly_enabled_by_default|length) %}
-            <div class="summary-card {{ 'success' if fg_total == 0 else 'warning' }}">
+            <div class="summary-card success">
                 <h3>Feature Gates</h3>
-                <p><strong>New:</strong> {{ feature_gates.comparison.added|length }}</p>
-                <p><strong>Removed:</strong> {{ feature_gates.comparison.removed|length }}</p>
-                <p><strong>Newly Default:</strong> {{ feature_gates.comparison.newly_enabled_by_default|length }}</p>
-            </div>
-            {% endif %}
-
-            {% if ocp_gate_ack %}
-            <div class="summary-card {{ 'warning' if ocp_gate_ack.summary.ack_file_missing else ('success' if ocp_gate_ack.summary.upgrade_ready else 'warning') }}">
-                <h3>OCP Admin Gates</h3>
-                <p><strong>Status:</strong>
-                    {% if ocp_gate_ack.summary.ack_file_missing %}⚠️ Warning
-                    {% elif ocp_gate_ack.summary.upgrade_ready %}✅ Ready
-                    {% else %}❌ Not Ready
-                    {% endif %}
-                </p>
-                <p><strong>Requiring Ack:</strong> {{ ocp_gate_ack.summary.gates_requiring_ack }}</p>
-                <p><strong>Unacknowledged:</strong> {{ ocp_gate_ack.summary.unacknowledged }}</p>
+                <p><strong>Status:</strong> ✅ PASS (Informational)</p>
+                <p><strong>New:</strong> {{ feature_gates.comparison.added|length }} | <strong>Removed:</strong> {{ feature_gates.comparison.removed|length }} | <strong>Newly Default:</strong> {{ feature_gates.comparison.newly_enabled_by_default|length }}</p>
             </div>
             {% endif %}
         </div>
 
-        {% if aws_sts and (aws_sts.comparison.actions.target_only or aws_sts.comparison.actions.baseline_only) %}
+        {% if aws_sts and (aws_sts.comparison.actions.target_only or aws_sts.comparison.actions.baseline_only or aws_sts.comparison.file_changes) %}
         <h2>AWS STS Policy Details</h2>
+
+        {% if aws_sts.validation_result == 'FAIL' %}
+        <div style="background-color: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; border-radius: 5px;">
+            <strong>❌ Validation Failed</strong>
+            <ul style="margin: 10px 0 0 0; padding-left: 20px;">
+            {% if aws_sts.validation_details.check_1_resources.status == 'FAIL' %}
+                {% for error in aws_sts.validation_details.check_1_resources.errors %}
+                <li>Resources: {{ error }}</li>
+                {% endfor %}
+            {% endif %}
+            {% if aws_sts.validation_details.check_2_admin_ack.status == 'FAIL' %}
+                {% for error in aws_sts.validation_details.check_2_admin_ack.errors %}
+                <li>Admin Ack: {{ error }}</li>
+                {% endfor %}
+            {% endif %}
+            </ul>
+        </div>
+        {% endif %}
 
         {% if aws_sts.comparison.actions.target_only %}
         <h3>Added Permissions</h3>
@@ -182,6 +231,44 @@
                 {% endfor %}
             </tbody>
         </table>
+        {% endif %}
+
+        {% if aws_sts.comparison.file_changes %}
+        <h3>Changed Files</h3>
+        {% for file_info in aws_sts.comparison.file_changes %}
+        <h4>{{ file_info.filename }}</h4>
+        <p><strong>Changes:</strong> {{ file_info.actions_added_count }} added, {{ file_info.actions_removed_count }} removed</p>
+        {% if file_info.actions_added or file_info.actions_removed %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Change Type</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in file_info.actions_added %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="added">✅ Added</td>
+                </tr>
+                {% endfor %}
+                {% for action in file_info.actions_removed %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="removed">❌ Removed</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endfor %}
+
+        {% if aws_sts.validation_details and aws_sts.validation_details.check_1_resources and aws_sts.validation_details.check_1_resources.status == 'FAIL' %}
+        <p style="background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107;">
+            <strong>Note:</strong> managed-cluster-config validation failed. The changes shown above are expected but may be missing in managed-cluster-config.
+        </p>
+        {% endif %}
         {% endif %}
 
         {% if aws_sts.comparison.actions.baseline_only %}
@@ -205,8 +292,26 @@
         {% endif %}
         {% endif %}
 
-        {% if gcp_wif and (gcp_wif.comparison.actions.target_only or gcp_wif.comparison.actions.baseline_only) %}
+        {% if gcp_wif and (gcp_wif.comparison.actions.target_only or gcp_wif.comparison.actions.baseline_only or gcp_wif.comparison.file_changes) %}
         <h2>GCP WIF Policy Details</h2>
+
+        {% if gcp_wif.validation_result == 'FAIL' %}
+        <div style="background-color: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; border-radius: 5px;">
+            <strong>❌ Validation Failed</strong>
+            <ul style="margin: 10px 0 0 0; padding-left: 20px;">
+            {% if gcp_wif.validation_details.check_1_resources.status == 'FAIL' %}
+                {% for error in gcp_wif.validation_details.check_1_resources.errors %}
+                <li>Resources: {{ error }}</li>
+                {% endfor %}
+            {% endif %}
+            {% if gcp_wif.validation_details.check_2_admin_ack.status == 'FAIL' %}
+                {% for error in gcp_wif.validation_details.check_2_admin_ack.errors %}
+                <li>Admin Ack: {{ error }}</li>
+                {% endfor %}
+            {% endif %}
+            </ul>
+        </div>
+        {% endif %}
 
         {% if gcp_wif.comparison.actions.target_only %}
         <h3>Added Permissions</h3>
@@ -228,6 +333,44 @@
         </table>
         {% endif %}
 
+        {% if gcp_wif.comparison.file_changes %}
+        <h3>Changed Files</h3>
+        {% for file_info in gcp_wif.comparison.file_changes %}
+        <h4>{{ file_info.filename }}</h4>
+        <p><strong>Changes:</strong> {{ file_info.permissions_added_count }} added, {{ file_info.permissions_removed_count }} removed</p>
+        {% if file_info.permissions_added or file_info.permissions_removed %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Change Type</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in file_info.permissions_added %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="added">✅ Added</td>
+                </tr>
+                {% endfor %}
+                {% for action in file_info.permissions_removed %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="removed">❌ Removed</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endfor %}
+
+        {% if gcp_wif.validation_details and gcp_wif.validation_details.check_1_resources and gcp_wif.validation_details.check_1_resources.status == 'FAIL' %}
+        <p style="background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107;">
+            <strong>Note:</strong> managed-cluster-config validation failed. The changes shown above are expected but may be missing in managed-cluster-config.
+        </p>
+        {% endif %}
+        {% endif %}
+
         {% if gcp_wif.comparison.actions.baseline_only %}
         <h3>Removed Permissions</h3>
         <table>
@@ -246,6 +389,79 @@
                 {% endfor %}
             </tbody>
         </table>
+        {% endif %}
+        {% endif %}
+
+        {% if ocp_gate_ack %}
+        <h2>OCP Admin Gate Acknowledgment Details</h2>
+
+        {% if ocp_gate_ack.summary.gates_requiring_ack == 0 %}
+        <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; border-radius: 5px;">
+            <strong>✅ No admin gates in baseline version</strong> - No acknowledgments required for upgrade
+        </div>
+        {% else %}
+        {% if ocp_gate_ack.validation_result == 'FAIL' %}
+        <div style="background-color: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; border-radius: 5px;">
+            <strong>❌ Validation Failed</strong>
+            <ul style="margin: 10px 0 0 0; padding-left: 20px;">
+            {% if ocp_gate_ack.summary.ack_file_missing and ocp_gate_ack.summary.gates_requiring_ack > 0 %}
+                <li>Acknowledgment file missing for version {{ ocp_gate_ack.target }}</li>
+            {% endif %}
+            {% if ocp_gate_ack.summary.unacknowledged > 0 %}
+                <li>{{ ocp_gate_ack.summary.unacknowledged }} gate(s) not acknowledged</li>
+            {% endif %}
+            {% if not ocp_gate_ack.config_validation.valid %}
+                {% for error in ocp_gate_ack.config_validation.errors %}
+                <li>Config: {{ error }}</li>
+                {% endfor %}
+            {% endif %}
+            </ul>
+        </div>
+        {% else %}
+        <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; border-radius: 5px;">
+            <strong>✅ Validation Passed</strong> - All admin gates are properly acknowledged
+        </div>
+        {% endif %}
+
+        {% if ocp_gate_ack.analysis.acknowledged_gates %}
+        <h3>✅ Acknowledged Gates</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in ocp_gate_ack.analysis.acknowledged_gates %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="added">✅ Acknowledged</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if ocp_gate_ack.analysis.unacknowledged_gates %}
+        <h3>❌ Unacknowledged Gates</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in ocp_gate_ack.analysis.unacknowledged_gates %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="removed">❌ Not Acknowledged</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
         {% endif %}
         {% endif %}
 
@@ -328,80 +544,6 @@
                 <tr>
                     <td><code>{{ gate }}</code></td>
                     <td class="removed">⚠️ Removed from Default</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% endif %}
-        {% endif %}
-        {% endif %}
-
-        {% if ocp_gate_ack %}
-        <h2>OCP Admin Gate Acknowledgment Details</h2>
-
-        {% if ocp_gate_ack.summary.gates_requiring_ack == 0 %}
-        <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; border-radius: 5px;">
-            <strong>✅ No admin gates in baseline version</strong> - No acknowledgments required for upgrade
-        </div>
-        {% if ocp_gate_ack.summary.ack_file_missing %}
-        <div style="background-color: #fff3cd; border-left: 4px solid #ffc107; padding: 15px; margin: 20px 0; border-radius: 5px;">
-            <strong>⚠️ WARNING</strong>
-            <p>Acknowledgment file not found for version <strong>{{ ocp_gate_ack.target }}</strong></p>
-            <p>Expected file: <code>deploy/osd-cluster-acks/ocp/{{ ocp_gate_ack.target }}/admin-ack.yaml</code></p>
-            <p><em>Note: No gates currently require acknowledgment, but the file should exist for this version.</em></p>
-        </div>
-        {% endif %}
-        {% else %}
-        {% if not ocp_gate_ack.summary.upgrade_ready %}
-        <div style="background-color: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; border-radius: 5px;">
-            <strong>❌ UPGRADE NOT READY</strong>
-            {% if ocp_gate_ack.summary.ack_file_missing %}
-            <p>Acknowledgment file is missing for version {{ ocp_gate_ack.target }}</p>
-            {% endif %}
-            {% if ocp_gate_ack.summary.unacknowledged > 0 %}
-            <p>{{ ocp_gate_ack.summary.unacknowledged }} gate(s) are not acknowledged</p>
-            {% endif %}
-        </div>
-        {% else %}
-        <div style="background-color: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; border-radius: 5px;">
-            <strong>✅ UPGRADE READY</strong> - All admin gates are properly acknowledged
-        </div>
-        {% endif %}
-
-        {% if ocp_gate_ack.analysis.acknowledged_gates %}
-        <h3>✅ Acknowledged Gates</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Gate</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for gate in ocp_gate_ack.analysis.acknowledged_gates %}
-                <tr>
-                    <td><code>{{ gate }}</code></td>
-                    <td class="added">✅ Acknowledged</td>
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-        {% endif %}
-
-        {% if ocp_gate_ack.analysis.unacknowledged_gates %}
-        <h3>❌ Unacknowledged Gates</h3>
-        <table>
-            <thead>
-                <tr>
-                    <th>Gate</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for gate in ocp_gate_ack.analysis.unacknowledged_gates %}
-                <tr>
-                    <td><code>{{ gate }}</code></td>
-                    <td class="removed">❌ Not Acknowledged</td>
                 </tr>
                 {% endfor %}
             </tbody>

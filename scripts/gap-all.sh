@@ -21,7 +21,8 @@ usage() {
 Usage: $0 [OPTIONS]
 
 Run gap analysis between two OpenShift versions for both AWS and GCP platforms.
-Logs detected policy differences but always exits 0 on successful execution.
+Validates target version structure in managed-cluster-config repository.
+Exits 1 if target version validation fails (FAIL), exits 0 if validation passes (PASS).
 
 Optional Arguments:
   --baseline <version>     Baseline version (default: auto-detect from latest stable)
@@ -61,8 +62,8 @@ Examples:
   TARGET_VERSION=CANDIDATE $0
 
 Exit Codes:
-  0 - Successful execution (regardless of whether differences were found)
-  1 - Execution failure (e.g., missing tools, network errors, invalid versions)
+  0 - All checks passed (PASS)
+  1 - One or more checks failed (FAIL) OR execution failure
 
 EOF
     exit 1
@@ -139,7 +140,7 @@ main() {
     log_info "========================================="
     log_info "Baseline: $BASELINE"
     log_info "Target:   $TARGET"
-    log_info "Gap Analysis checks: AWS STS, GCP WIF, Feature Gates, OCP Gate Acknowledgments"
+    log_info "Gap Analysis checks: AWS STS, GCP WIF, OCP Gate Acknowledgments, Feature Gates"
     log_info "Report Directory: $REPORT_DIR"
     log_info "========================================="
 
@@ -158,65 +159,54 @@ main() {
     # Run AWS STS analysis
     log_info ""
     log_info "Running AWS STS Policy Gap Analysis..."
-    aws_output=$(python3 "${SCRIPT_DIR}/gap-aws-sts.py" \
+    if python3 "${SCRIPT_DIR}/gap-aws-sts.py" \
         --baseline "$BASELINE" \
         --target "$TARGET" \
         --report-dir "$REPORT_DIR" \
-        $VERBOSE_FLAG 2>&1) || {
-        log_error "AWS STS analysis failed to execute"
-        exit 1
-    }
-    echo "$aws_output" >&2
-    if echo "$aws_output" | grep -q "Policy differences detected"; then
+        $VERBOSE_FLAG 2>&1; then
+        aws_result=0
+    else
         aws_result=1
     fi
 
     # Run GCP WIF analysis
     log_info ""
     log_info "Running GCP WIF Policy Gap Analysis..."
-    gcp_output=$(python3 "${SCRIPT_DIR}/gap-gcp-wif.py" \
+    if python3 "${SCRIPT_DIR}/gap-gcp-wif.py" \
         --baseline "$BASELINE" \
         --target "$TARGET" \
         --report-dir "$REPORT_DIR" \
-        $VERBOSE_FLAG 2>&1) || {
-        log_error "GCP WIF analysis failed to execute"
-        exit 1
-    }
-    echo "$gcp_output" >&2
-    if echo "$gcp_output" | grep -q "Policy differences detected"; then
+        $VERBOSE_FLAG 2>&1; then
+        gcp_result=0
+    else
         gcp_result=1
-    fi
-
-    # Run Feature Gates analysis
-    log_info ""
-    log_info "Running Feature Gates Gap Analysis..."
-    feature_gates_output=$(python3 "${SCRIPT_DIR}/gap-feature-gates.py" \
-        --baseline "$BASELINE" \
-        --target "$TARGET" \
-        --report-dir "$REPORT_DIR" \
-        $VERBOSE_FLAG 2>&1) || {
-        log_error "Feature Gates analysis failed to execute"
-        exit 1
-    }
-    echo "$feature_gates_output" >&2
-    if echo "$feature_gates_output" | grep -q "Feature gate differences detected"; then
-        feature_gates_result=1
     fi
 
     # Run OCP Gate Acknowledgment analysis
     log_info ""
     log_info "Running OCP Admin Gate Acknowledgment Analysis..."
-    ocp_gate_ack_output=$(python3 "${SCRIPT_DIR}/gap-ocp-gate-ack.py" \
+    if python3 "${SCRIPT_DIR}/gap-ocp-gate-ack.py" \
         --baseline "$BASELINE" \
         --target "$TARGET" \
         --report-dir "$REPORT_DIR" \
-        $VERBOSE_FLAG 2>&1) || {
-        log_error "OCP Gate Acknowledgment analysis failed to execute"
-        exit 1
-    }
-    echo "$ocp_gate_ack_output" >&2
-    if echo "$ocp_gate_ack_output" | grep -q "UPGRADE NOT READY\|Unacknowledged gates\|Acknowledgment file missing"; then
+        $VERBOSE_FLAG 2>&1; then
+        ocp_gate_ack_result=0
+    else
         ocp_gate_ack_result=1
+    fi
+
+    # Run Feature Gates analysis (informational only - always passes)
+    # IMPORTANT: Feature Gates should always be executed last, even if new checks are added in the future
+    log_info ""
+    log_info "Running Feature Gates Gap Analysis..."
+    if python3 "${SCRIPT_DIR}/gap-feature-gates.py" \
+        --baseline "$BASELINE" \
+        --target "$TARGET" \
+        --report-dir "$REPORT_DIR" \
+        $VERBOSE_FLAG 2>&1; then
+        feature_gates_result=0
+    else
+        feature_gates_result=1
     fi
 
     # Print summary
@@ -225,22 +215,19 @@ main() {
     log_info "  Gap Analysis Complete!"
     log_info "========================================="
 
-    if [[ $aws_result -eq 0 ]] && [[ $gcp_result -eq 0 ]] && [[ $feature_gates_result -eq 0 ]] && [[ $ocp_gate_ack_result -eq 0 ]]; then
-        log_success "No policy, feature gate differences, or gate acknowledgment issues found"
+    if [[ $aws_result -eq 0 ]] && [[ $gcp_result -eq 0 ]] && [[ $ocp_gate_ack_result -eq 0 ]]; then
+        log_success "All validation checks passed"
     else
         if [[ $aws_result -eq 1 ]]; then
-            log_info "AWS STS: Policy differences detected"
+            log_info "AWS STS: Target version validation failed (FAIL)"
         fi
         if [[ $gcp_result -eq 1 ]]; then
-            log_info "GCP WIF: Policy differences detected"
-        fi
-        if [[ $feature_gates_result -eq 1 ]]; then
-            log_info "Feature Gates: Differences detected"
+            log_info "GCP WIF: Target version validation failed (FAIL)"
         fi
         if [[ $ocp_gate_ack_result -eq 1 ]]; then
-            log_info "OCP Gate Acknowledgments: Issues detected"
+            log_info "OCP Gate Acknowledgments: Target version validation failed (FAIL)"
         fi
-        log_info "Differences detected - review recommended"
+        log_info "Feature Gates: Informational only (does not affect pass/fail)"
     fi
 
     # Generate combined report
@@ -253,8 +240,18 @@ main() {
         log_warning "Failed to generate combined report (individual reports still available)"
     }
 
-    # Always exit 0 on successful completion
-    exit 0
+    # Exit 1 if any check failed
+    # Note: feature gates are informational only and always pass (exit 0)
+    # If feature_gates_result=1, it means script execution error, which should fail
+    if [[ $aws_result -eq 1 ]] || [[ $gcp_result -eq 1 ]] || [[ $feature_gates_result -eq 1 ]] || [[ $ocp_gate_ack_result -eq 1 ]]; then
+        log_error ""
+        log_error "❌ FAILED"
+        exit 1
+    else
+        log_success ""
+        log_success "✅ PASSED"
+        exit 0
+    fi
 }
 
 main "$@"

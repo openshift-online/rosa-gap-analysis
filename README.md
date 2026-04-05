@@ -10,12 +10,18 @@ This framework helps platform teams identify IAM permission and feature gate cha
 
 ### What It Analyzes
 
-| Analysis Type | Description | Platforms |
-|---------------|-------------|-----------|
-| **AWS STS Policies** | IAM permission changes for AWS-based clusters | OSD AWS, ROSA Classic, ROSA HCP |
-| **GCP WIF Policies** | Workload Identity Federation changes for GCP clusters | OSD GCP |
-| **Feature Gates** | Feature gate additions, removals, and default enablement changes | All platforms |
-| **OCP Admin Gate Acks** | Validates admin gate acknowledgments for upgrade readiness | Managed clusters (OSD, ROSA) |
+The framework performs **6 validation checks** across all scripts:
+
+| Check # | Analysis Type | Description | Pass/Fail Impact |
+|---------|---------------|-------------|------------------|
+| **1** | AWS STS Resources | Validates STS policy files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) | Exit 1 on FAIL |
+| **2** | AWS STS Admin Ack | Validates AWS acknowledgment files | Exit 1 on FAIL |
+| **3** | GCP WIF Resources | Validates WIF template in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) | Exit 1 on FAIL |
+| **4** | GCP WIF Admin Ack | Validates GCP acknowledgment files | Exit 1 on FAIL |
+| **5** | OCP Admin Gates | Validates admin gate acknowledgments | Exit 1 on FAIL |
+| **6** | Feature Gates | Tracks feature gate changes (informational) | Always PASS |
+
+See [Validation Checks](docs/validation-checks.md) for detailed information about each check.
 
 ### Key Features
 
@@ -74,13 +80,14 @@ jq '.aws_sts.comparison' reports/gap-analysis-full_*.json
 ## Documentation
 
 - [📘 Overview](docs/overview.md) - What gap analysis does and how it works
+- [✅ Validation Checks](docs/validation-checks.md) - Details about all 6 validation checks
 - [🚀 Getting Started](docs/getting-started.md) - Installation and basic usage
 - [⚙️ Configuration](docs/configuration.md) - CLI arguments, environment variables, version resolution
 - [🔄 CI/CD Integration](docs/ci-integration.md) - Pipeline integration patterns
 - [🔧 Development](docs/development.md) - Contributing and customization
 
 **Additional Resources:**
-- [📊 Report Documentation](REPORTS.md) - Report formats and viewing
+- [📊 Report Documentation](docs/reports.md) - Report formats and viewing
 - [🐳 Container Image](ci/README.md) - CI container image details
 
 ## Repository Structure

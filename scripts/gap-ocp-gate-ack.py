@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 from common import log_info, log_success, log_error, log_warning
 from openshift_releases import resolve_baseline_version, resolve_target_version, extract_minor_version
 from reporters import generate_markdown_report, generate_html_report, generate_json_report
+from ack_validation import fetch_yaml_from_url, calculate_expected_baseline, validate_config_yaml
 
 try:
     import yaml
@@ -83,6 +84,57 @@ def fetch_admin_acks(version):
         log_warning(f"No acknowledgments found in ConfigMap for version {version}")
 
     return acks
+
+
+def validate_ocp_config(baseline, target):
+    """
+    Validate config.yaml for OCP acknowledgments.
+
+    Args:
+        baseline: Baseline version
+        target: Target version
+
+    Returns:
+        dict with validation results
+    """
+    target_minor = extract_minor_version(target)
+    expected_baseline = calculate_expected_baseline(target_minor)
+
+    url = f"https://raw.githubusercontent.com/openshift/managed-cluster-config/master/deploy/osd-cluster-acks/ocp/{target_minor}/config.yaml"
+
+    result = {
+        'valid': False,
+        'exists': False,
+        'expected_baseline': expected_baseline,
+        'actual_baseline': None,
+        'errors': []
+    }
+
+    log_info(f"Validating config.yaml...")
+
+    try:
+        config_data = fetch_yaml_from_url(url)
+        if config_data is None:
+            result['errors'].append(f"config.yaml not found at {url}")
+            return result
+
+        result['exists'] = True
+
+        # Validate config.yaml (no selector needed for OCP)
+        is_valid, errors, actual_baseline = validate_config_yaml(
+            config_data,
+            expected_baseline,
+            selector_key=None
+        )
+
+        result['valid'] = is_valid
+        result['errors'] = errors
+        result['actual_baseline'] = actual_baseline
+
+    except Exception as e:
+        result['errors'].append(f"Error validating config.yaml: {e}")
+
+    return result
 
 
 def analyze_gate_acknowledgments(baseline_version, target_version, baseline_gates, target_acks):
@@ -179,8 +231,8 @@ Examples:
   %(prog)s
 
 Exit Codes:
-  0 - Successful execution (regardless of whether gates are acknowledged)
-  1 - Execution failure (e.g., network errors, missing files)
+  0 - Target version validation passed (PASS)
+  1 - Target version validation failed (FAIL) OR execution failure
         """
     )
 
@@ -225,8 +277,20 @@ Exit Codes:
         log_info("\nAnalyzing gate acknowledgments...")
         analysis = analyze_gate_acknowledgments(baseline, target, baseline_gates, target_acks)
 
-        # Print results
+        # Print results with CHECK #5
+        log_info("\nCHECK #5: OCP Admin Gate Acknowledgments")
         print_analysis(analysis, baseline, target)
+
+        # Validate config.yaml
+        log_info("\nValidating config.yaml...")
+        config_validation = validate_ocp_config(baseline, target)
+
+        if config_validation['valid']:
+            log_success(f"✓ config.yaml valid: baseline version {config_validation['actual_baseline']} matches expected")
+        else:
+            log_error("✗ config.yaml validation failed:")
+            for error in config_validation['errors']:
+                log_error(f"  - {error}")
 
         # Generate reports
         report_dir = args.report_dir
@@ -240,6 +304,11 @@ Exit Codes:
         unacked_count = len(analysis['unacknowledged_gates'])
         upgrade_ready = (gates_count == 0) or (unacked_count == 0 and not analysis['ack_file_missing'])
 
+        # Determine validation result - must pass both gate acks AND config validation
+        gates_valid = upgrade_ready
+        config_valid = config_validation['valid']
+        validation_result = 'PASS' if (gates_valid and config_valid) else 'FAIL'
+
         report_data = {
             'type': 'OCP Admin Gate Acknowledgment Analysis',
             'baseline': baseline,
@@ -247,6 +316,8 @@ Exit Codes:
             'baseline_full': baseline_full,
             'target_full': target_full,
             'timestamp': datetime.now().isoformat(),
+            'validation_result': validation_result,
+            'config_validation': config_validation,
             'analysis': analysis,
             'summary': {
                 'gates_requiring_ack': gates_count,
@@ -279,8 +350,40 @@ Exit Codes:
             generate_html_report(report_data, html_file)
             log_info(f"HTML report generated: {html_file}")
 
-        # Always exit 0 on successful completion
-        sys.exit(0)
+        # Exit 1 if gates unacknowledged, ack file missing, or config invalid
+        gates_failed = unacked_count > 0 or (analysis['ack_file_missing'] and gates_count > 0)
+        config_failed = not config_validation['valid']
+
+        mcc_ocp_ack_url = f"https://github.com/openshift/managed-cluster-config/tree/master/deploy/osd-cluster-acks/ocp/{target}"
+
+        if gates_failed or config_failed:
+            log_error("=" * 60)
+            log_error("✗ VALIDATION FAILED")
+            log_error("=" * 60)
+            log_error(f"\nCHECK #5: OCP Admin Gate Acknowledgments [FAIL]")
+            log_error(f"Location: {mcc_ocp_ack_url}")
+            log_error("")
+            if gates_failed:
+                log_error("Gate acknowledgments validation failed")
+            if config_failed:
+                log_error("config.yaml validation failed")
+            log_error("")
+            log_error(f"❌ FAILED - Target version validation failed")
+            sys.exit(1)
+        else:
+            log_success("=" * 60)
+            log_success("✓ VALIDATION PASSED - All checks successful")
+            log_success("=" * 60)
+            log_success(f"\nCHECK #5: OCP Admin Gate Acknowledgments [PASS]")
+            log_success(f"  Location: {mcc_ocp_ack_url}")
+            if gates_count > 0:
+                log_success(f"  ✓ {acked_count} gate(s) properly acknowledged")
+            else:
+                log_success(f"  ✓ No admin gates requiring acknowledgment")
+            log_success(f"  ✓ config.yaml: baseline version validated")
+            log_success("")
+            log_success(f"✅ PASSED - Target version structure validated")
+            sys.exit(0)
 
     except Exception as e:
         log_error(f"Analysis failed: {e}")

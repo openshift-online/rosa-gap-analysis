@@ -22,6 +22,34 @@
 {% endfor %}
 
 {% endif %}
+{% if comparison.file_changes %}
+### Changed Files
+
+{% for file_info in comparison.file_changes %}
+**{{ file_info.filename }}**
+- Actions added: {{ file_info.actions_added_count }}
+- Actions removed: {{ file_info.actions_removed_count }}
+
+{% if file_info.actions_added %}
+  Added:
+{% for action in file_info.actions_added %}
+  - ✅ `{{ action }}`
+{% endfor %}
+{% endif %}
+{% if file_info.actions_removed %}
+  Removed:
+{% for action in file_info.actions_removed %}
+  - ❌ `{{ action }}`
+{% endfor %}
+{% endif %}
+
+{% endfor %}
+
+{% if validation_details and validation_details.check_1_resources and validation_details.check_1_resources.status == 'FAIL' %}
+> **Note:** managed-cluster-config validation failed. The changes shown above are expected but may be missing in managed-cluster-config. See validation errors below.
+
+{% endif %}
+{% endif %}
 {% if comparison.actions.baseline_only %}
 ### Removed Actions
 

@@ -9,13 +9,155 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError, URLError
 
 # Add lib directory to path
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 
 from common import log_info, log_success, log_error, log_warning, check_command
-from openshift_releases import resolve_baseline_version, resolve_target_version
+from openshift_releases import resolve_baseline_version, resolve_target_version, extract_minor_version
 from reporters import generate_markdown_report, generate_html_report, generate_json_report
+from ack_validation import (
+    fetch_yaml_from_url,
+    calculate_expected_baseline,
+    validate_config_yaml,
+    validate_cloudcredential_yaml,
+    validate_wif_resources
+)
+
+
+def validate_wif_acknowledgment(baseline, target, added_actions=None):
+    """
+    Comprehensive validation of WIF acknowledgment in managed-cluster-config.
+
+    CHECK #1: Resources validation (resources/wif/{version}/)
+    CHECK #2: Admin acknowledgment validation (deploy/osd-cluster-acks/wif/{version}/)
+
+    Args:
+        baseline: Baseline version (e.g., "4.20.5")
+        target: Target version (e.g., "4.21.0")
+        added_actions: List of GCP permissions that were added in target
+
+    Returns:
+        dict with validation results for both checks
+    """
+    # Use minor versions
+    target_minor = extract_minor_version(target)
+    expected_baseline = calculate_expected_baseline(target_minor)
+
+    result = {
+        'valid': False,
+        'check_1_resources': {},
+        'check_2_admin_ack': {}
+    }
+
+    # ═══════════════════════════════════════════════════════════════
+    # CHECK #3: GCP WIF Resources Validation (resources/wif/{version}/)
+    # ═══════════════════════════════════════════════════════════════
+    log_info(f"CHECK #3: Validating resources/wif/{target_minor}/ directory...")
+
+    resources_result = validate_wif_resources(target_minor, added_actions)
+
+    result['check_1_resources'] = {
+        'status': 'PASS' if resources_result['valid'] else 'FAIL',
+        'valid': resources_result['valid'],
+        'errors': resources_result['errors'],
+        'vanilla_yaml_exists': resources_result.get('file_data') is not None,
+        'roles_with_changes': {},
+        'missing_actions': resources_result.get('missing_actions', [])
+    }
+
+    # Build report of which roles contain the changes
+    if added_actions:
+        for action, roles in resources_result.get('actions_found_in_roles', {}).items():
+            result['check_1_resources']['roles_with_changes'][action] = roles
+
+    check_1_valid = resources_result['valid']
+
+    # ═══════════════════════════════════════════════════════════════
+    # CHECK #4: GCP WIF Admin Acknowledgment Validation (deploy/osd-cluster-acks/wif/{version}/)
+    # ═══════════════════════════════════════════════════════════════
+    log_info(f"CHECK #4: Validating deploy/osd-cluster-acks/wif/{target_minor}/ acknowledgment...")
+
+    base_url = f"https://raw.githubusercontent.com/openshift/managed-cluster-config/master/deploy/osd-cluster-acks/wif/{target_minor}"
+
+    check_2_result = {
+        'status': 'PASS',
+        'valid': True,
+        'expected_baseline': expected_baseline,
+        'actual_baseline': None,
+        'files_checked': {},
+        'errors': []
+    }
+
+    # Check config.yaml
+    config_url = f"{base_url}/config.yaml"
+    config_result = {'exists': False, 'valid': False, 'errors': []}
+
+    try:
+        config_data = fetch_yaml_from_url(config_url)
+        if config_data is None:
+            config_result['errors'].append(f"File not found")
+            check_2_result['errors'].append("config.yaml not found")
+        else:
+            config_result['exists'] = True
+            is_valid, errors, actual_baseline = validate_config_yaml(
+                config_data,
+                expected_baseline,
+                selector_key="api.openshift.com/wif",
+                selector_value="true"
+            )
+            config_result['valid'] = is_valid
+            config_result['errors'] = errors
+            check_2_result['actual_baseline'] = actual_baseline
+
+            if not is_valid:
+                check_2_result['errors'].extend(errors)
+    except Exception as e:
+        config_result['errors'].append(f"Error: {e}")
+        check_2_result['errors'].append(f"config.yaml error: {e}")
+
+    check_2_result['files_checked']['config.yaml'] = config_result
+
+    # Check osd-wif-ack_CloudCredential.yaml
+    cc_url = f"{base_url}/osd-wif-ack_CloudCredential.yaml"
+    cc_result = {'exists': False, 'valid': False, 'errors': []}
+
+    try:
+        cc_data = fetch_yaml_from_url(cc_url)
+        if cc_data is None:
+            cc_result['errors'].append(f"File not found")
+            check_2_result['errors'].append("osd-wif-ack_CloudCredential.yaml not found")
+        else:
+            cc_result['exists'] = True
+            is_valid, errors, actual_version = validate_cloudcredential_yaml(cc_data, target_minor)
+            cc_result['valid'] = is_valid
+            cc_result['errors'] = errors
+
+            if not is_valid:
+                check_2_result['errors'].extend(errors)
+    except Exception as e:
+        cc_result['errors'].append(f"Error: {e}")
+        check_2_result['errors'].append(f"CloudCredential error: {e}")
+
+    check_2_result['files_checked']['osd-wif-ack_CloudCredential.yaml'] = cc_result
+
+    check_2_valid = (
+        config_result.get('valid', False) and
+        cc_result.get('valid', False) and
+        len(check_2_result['errors']) == 0
+    )
+
+    check_2_result['valid'] = check_2_valid
+    check_2_result['status'] = 'PASS' if check_2_valid else 'FAIL'
+
+    result['check_2_admin_ack'] = check_2_result
+
+    # Overall validity - BOTH checks must pass
+    result['valid'] = check_1_valid and check_2_valid
+
+    return result
 
 
 def extract_credential_requests(version, cloud="gcp"):
@@ -130,8 +272,68 @@ def convert_credential_requests_to_policy(cr_dir):
     return policy
 
 
+def compare_credential_requests_per_file(baseline_dir, target_dir):
+    """Compare credential request files between baseline and target to detect per-file changes."""
+    import glob
+    try:
+        import yaml
+    except ImportError:
+        log_error("PyYAML not installed. Please install: pip3 install PyYAML")
+        return []
+
+    changed_files = []
+
+    # Get all YAML files from both directories
+    baseline_files = {os.path.basename(f): f for f in glob.glob(os.path.join(baseline_dir, '*.yaml'))}
+    target_files = {os.path.basename(f): f for f in glob.glob(os.path.join(target_dir, '*.yaml'))}
+
+    # Check all files that exist in target
+    for filename in sorted(target_files.keys()):
+        target_path = target_files[filename]
+        baseline_path = baseline_files.get(filename)
+
+        # Extract permissions from target
+        try:
+            with open(target_path, 'r') as f:
+                target_cr = yaml.safe_load(f)
+            target_permissions = set(target_cr.get('spec', {}).get('providerSpec', {}).get('permissions', []))
+        except Exception as e:
+            log_warning(f"Failed to parse {filename} from target: {e}")
+            continue
+
+        # Extract permissions from baseline (if exists)
+        baseline_permissions = set()
+        if baseline_path:
+            try:
+                with open(baseline_path, 'r') as f:
+                    baseline_cr = yaml.safe_load(f)
+                baseline_permissions = set(baseline_cr.get('spec', {}).get('providerSpec', {}).get('permissions', []))
+            except Exception as e:
+                log_warning(f"Failed to parse {filename} from baseline: {e}")
+
+        # Calculate differences
+        permissions_added = sorted(target_permissions - baseline_permissions)
+        permissions_removed = sorted(baseline_permissions - target_permissions)
+
+        # Only add to changed_files if there are actual differences
+        if permissions_added or permissions_removed:
+            changed_files.append({
+                'filename': filename,
+                'permissions_added': permissions_added,
+                'permissions_removed': permissions_removed,
+                'permissions_added_count': len(permissions_added),
+                'permissions_removed_count': len(permissions_removed)
+            })
+
+    return changed_files
+
+
 def get_wif_policy(version):
-    """Get WIF policy for a specific version."""
+    """Get WIF policy for a specific version.
+
+    Returns:
+        tuple: (policy dict, credential_requests_directory)
+    """
     log_info(f"Fetching GCP WIF policy for version {version}...")
 
     # Extract credential requests
@@ -142,17 +344,13 @@ def get_wif_policy(version):
     # Convert to policy
     policy = convert_credential_requests_to_policy(cr_dir)
 
-    # Clean up temp directory
-    import shutil
-    shutil.rmtree(cr_dir, ignore_errors=True)
-
     # Validate we got data
     if len(policy['Statement']) == 0:
         log_error("No statements found in extracted credential requests")
         sys.exit(1)
 
     log_success("Successfully extracted WIF policy")
-    return policy
+    return policy, cr_dir
 
 
 def compare_wif_policies(baseline_policy, target_policy):
@@ -203,8 +401,8 @@ Examples:
   %(prog)s --baseline 4.21 --target 4.22 --verbose
 
 Exit Codes:
-  0 - Successful execution (regardless of whether differences were found)
-  1 - Execution failure (e.g., missing tools, network errors, invalid versions)
+  0 - Target version validation passed (PASS)
+  1 - Target version validation failed (FAIL) OR execution failure
         """
     )
 
@@ -238,13 +436,21 @@ Exit Codes:
     check_command('oc')
     check_command('jq')
 
-    # Fetch policies
-    baseline_policy = get_wif_policy(baseline)
-    target_policy = get_wif_policy(target)
+    # Fetch policies (now returns tuple: policy and credential request directory)
+    baseline_policy, baseline_cr_dir = get_wif_policy(baseline)
+    target_policy, target_cr_dir = get_wif_policy(target)
 
-    # Compare
+    # Compare policies
     log_info("Comparing WIF policies...")
     comparison = compare_wif_policies(baseline_policy, target_policy)
+
+    # Compare credential request files to detect per-file changes
+    log_info("Comparing credential request files...")
+    file_changes = compare_credential_requests_per_file(baseline_cr_dir, target_cr_dir)
+
+    # Add file changes to comparison result
+    comparison['file_changes'] = file_changes
+    comparison['file_changes_count'] = len(file_changes)
 
     # Check for differences
     added_count = len(comparison['actions']['target_only'])
@@ -262,11 +468,70 @@ Exit Codes:
     os.makedirs(report_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Always validate target version structure (regardless of whether changes detected)
+    log_info("\nValidating target version structure in managed-cluster-config...")
+    validation_checked = True
+
+    # Extract added actions for validation (if any changes detected)
+    added_actions = comparison['actions']['target_only'] if total_changes > 0 else None
+    validation_details = validate_wif_acknowledgment(baseline, target, added_actions)
+
+    check_1 = validation_details['check_1_resources']
+    check_2 = validation_details['check_2_admin_ack']
+
+    target_minor = extract_minor_version(target)
+    mcc_wif_url = f"https://github.com/openshift/managed-cluster-config/tree/master/resources/wif/{target_minor}"
+    mcc_ack_url = f"https://github.com/openshift/managed-cluster-config/tree/master/deploy/osd-cluster-acks/wif/{target_minor}"
+
+    if validation_details['valid']:
+        validation_result = 'PASS'
+        log_success("=" * 60)
+        log_success("✓ VALIDATION PASSED - All checks successful")
+        log_success("=" * 60)
+        log_success(f"\nCHECK #3: GCP WIF Resources Validation [{check_1['status']}]")
+        log_success(f"  Location: {mcc_wif_url}")
+        log_success(f"  ✓ Validated vanilla.yaml")
+        if added_actions:
+            log_success(f"  ✓ All {len(added_actions)} added GCP permission(s) found")
+            if check_1['roles_with_changes']:
+                unique_roles = len(set([r for roles in check_1['roles_with_changes'].values() for r in roles]))
+                log_success(f"  ✓ Changes appear in {unique_roles} role(s)")
+        log_success(f"\nCHECK #4: GCP WIF Admin Acknowledgment [{check_2['status']}]")
+        log_success(f"  Location: {mcc_ack_url}")
+        log_success(f"  ✓ config.yaml: baseline version {check_2['actual_baseline']} matches expected")
+        log_success(f"  ✓ CloudCredential: upgrade version validated")
+        log_success("")
+    else:
+        validation_result = 'FAIL'
+        log_error("=" * 60)
+        log_error("✗ VALIDATION FAILED")
+        log_error("=" * 60)
+
+        if check_1['status'] == 'FAIL':
+            log_error(f"\nCHECK #3: GCP WIF Resources Validation [FAIL]")
+            log_error(f"Location: {mcc_wif_url}")
+            log_error("")
+            for error in check_1['errors']:
+                log_error(f"{error}")
+            log_error("")
+
+        if check_2['status'] == 'FAIL':
+            log_error(f"CHECK #4: GCP WIF Admin Acknowledgment [FAIL]")
+            log_error(f"Location: {mcc_ack_url}")
+            log_error("")
+            for error in check_2['errors']:
+                log_error(f"{error}")
+            log_error("")
+
     report_data = {
         'type': 'GCP WIF Policy Gap Analysis',
         'baseline': baseline,
         'target': target,
         'timestamp': datetime.now().isoformat(),
+        'validation_result': validation_result,
+        'validation_checked': validation_checked,
+        'validation_details': validation_details,
         'comparison': comparison,
         'summary': {
             'added': added_count,
@@ -294,8 +559,18 @@ Exit Codes:
         generate_html_report(report_data, html_file)
         log_info(f"HTML report generated: {html_file}")
 
-    # Always exit 0 on successful completion
-    sys.exit(0)
+    # Clean up credential request directories
+    import shutil
+    shutil.rmtree(baseline_cr_dir, ignore_errors=True)
+    shutil.rmtree(target_cr_dir, ignore_errors=True)
+
+    # Exit based on validation result
+    if validation_result == 'FAIL':
+        log_error(f"\n❌ FAILED - Target version validation failed")
+        sys.exit(1)
+    else:
+        log_success(f"\n✅ PASSED - Target version structure validated")
+        sys.exit(0)
 
 
 if __name__ == '__main__':

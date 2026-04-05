@@ -197,7 +197,8 @@ Exit Codes:
     log_info("Comparing feature gates...")
     comparison = compare_feature_gates(baseline_data, target_data)
 
-    # Print results
+    # Print results with CHECK #6
+    log_info("\nCHECK #6: Feature Gates Analysis")
     print_comparison(comparison, baseline, target, args.verbose)
 
     # Generate reports
@@ -211,12 +212,15 @@ Exit Codes:
     newly_default_count = len(comparison['newly_enabled_by_default'])
     removed_default_count = len(comparison['removed_from_default'])
     total_changes = added_count + removed_count + newly_default_count + removed_default_count
+    # Feature gates are informational only - always PASS regardless of changes
+    validation_result = 'PASS'
 
     report_data = {
         'type': 'Feature Gate Gap Analysis',
         'baseline': baseline,
         'target': target,
         'timestamp': datetime.now().isoformat(),
+        'validation_result': validation_result,
         'comparison': comparison,
         'summary': {
             'added': added_count,
@@ -246,7 +250,29 @@ Exit Codes:
         generate_html_report(report_data, html_file)
         log_info(f"HTML report generated: {html_file}")
 
-    # Always exit 0 on successful completion
+    # Feature gates are informational only - always pass
+    sippy_url = f"https://sippy.dptools.openshift.org/api/feature_gates?release={target}"
+
+    log_success("=" * 60)
+    log_success("✓ VALIDATION PASSED - Feature Gates (Informational)")
+    log_success("=" * 60)
+    log_success(f"\nCHECK #6: Feature Gates Analysis [PASS - Informational]")
+    log_success(f"  Data Source: Sippy API")
+    log_success(f"  URL: {sippy_url}")
+    if total_changes > 0:
+        log_success(f"  ℹ️  Detected {total_changes} change(s) (informational only)")
+        if added_count > 0:
+            log_success(f"    • {added_count} new feature gate(s)")
+        if removed_count > 0:
+            log_success(f"    • {removed_count} removed feature gate(s)")
+        if newly_default_count > 0:
+            log_success(f"    • {newly_default_count} newly enabled by default")
+        if removed_default_count > 0:
+            log_success(f"    • {removed_default_count} removed from default")
+    else:
+        log_success(f"  ✓ No feature gate changes detected")
+    log_success("")
+    log_success(f"✅ PASSED - Feature Gates analysis complete (informational)")
     sys.exit(0)
 
 

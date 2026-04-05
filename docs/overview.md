@@ -4,12 +4,21 @@ OpenShift Gap Analysis Framework for comparing cloud credential policies and fea
 
 ## What It Does
 
-Identifies changes between OpenShift versions in four areas:
+Identifies changes between OpenShift versions through 6 validation checks:
 
-1. **AWS STS Policies** - IAM permission changes for AWS clusters (OSD AWS, ROSA Classic, ROSA HCP)
-2. **GCP WIF Policies** - Workload Identity Federation changes for GCP clusters (OSD GCP)
-3. **Feature Gates** - Feature additions, removals, and default enablement changes
-4. **OCP Admin Gate Acknowledgments** - Validates upgrade readiness by checking required gate acknowledgments
+**Checks 1-2: AWS STS Validation**
+- **Check 1:** AWS STS Resources - Validates policy files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config)
+- **Check 2:** AWS STS Admin Ack - Validates acknowledgment files for AWS clusters
+
+**Checks 3-4: GCP WIF Validation**
+- **Check 3:** GCP WIF Resources - Validates WIF template in [managed-cluster-config](https://github.com/openshift/managed-cluster-config)
+- **Check 4:** GCP WIF Admin Ack - Validates acknowledgment files for GCP clusters
+
+**Check 5: OCP Admin Gate Acknowledgments**
+- **Check 5:** OCP Admin Gates - Validates upgrade readiness by checking required gate acknowledgments
+
+**Check 6: Feature Gates (Informational)**
+- **Check 6:** Feature Gates - Tracks feature additions, removals, and default enablement changes (informational only, always PASS)
 
 ## How It Works
 
@@ -67,8 +76,15 @@ fi
 
 **AWS STS / GCP WIF:**
 - `oc adm release extract --credentials-requests --cloud={aws,gcp}`
-- Extracts CredentialsRequest manifests from release images
+- Extracts CredentialsRequest manifests from release images to temporary directories
 - Same approach as `osdctl iampermissions diff`
+- Dynamically discovers files (no hardcoded lists)
+
+**[managed-cluster-config](https://github.com/openshift/managed-cluster-config) Validation:**
+- Uses `git clone --sparse-checkout` to efficiently fetch only needed directories
+- Downloads only `resources/sts/{version}` or `resources/wif/{version}` 
+- Compares [managed-cluster-config](https://github.com/openshift/managed-cluster-config) policies against OCP release changes
+- All file discovery is dynamic - no hardcoded file lists
 
 **Feature Gates:**
 - `https://sippy.dptools.openshift.org/api/feature_gates?release={version}`
@@ -76,7 +92,22 @@ fi
 
 **OCP Admin Gate Acknowledgments:**
 - `https://github.com/openshift/cluster-version-operator` - Admin gate ConfigMaps
-- `https://github.com/openshift/managed-cluster-config` - Acknowledgment ConfigMaps
+- [`https://github.com/openshift/managed-cluster-config`](https://github.com/openshift/managed-cluster-config) - Acknowledgment ConfigMaps
+
+## Implementation Details
+
+**File Discovery:**
+- OCP credential requests: Extracted to temporary directories, dynamically listed
+- [managed-cluster-config](https://github.com/openshift/managed-cluster-config): Git sparse checkout to temporary directories
+- No hardcoded file lists - everything discovered at runtime
+- Efficient: Only downloads needed directories, not entire repositories
+
+**Comparison Flow:**
+1. Extract OCP release credential requests → temp directories
+2. Sparse checkout [managed-cluster-config](https://github.com/openshift/managed-cluster-config) → temp directories
+3. Compare files and actions between versions
+4. Validate [managed-cluster-config](https://github.com/openshift/managed-cluster-config) matches OCP release changes
+5. Cleanup all temporary directories
 
 ## Reports
 

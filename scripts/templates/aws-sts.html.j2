@@ -150,6 +150,44 @@
         </table>
         {% endif %}
 
+        {% if comparison.file_changes %}
+        <h3>Changed Files</h3>
+        {% for file_info in comparison.file_changes %}
+        <h4>{{ file_info.filename }}</h4>
+        <p><strong>Changes:</strong> {{ file_info.actions_added_count }} added, {{ file_info.actions_removed_count }} removed</p>
+        {% if file_info.actions_added or file_info.actions_removed %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Action</th>
+                    <th>Change Type</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for action in file_info.actions_added %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="added">✅ Added</td>
+                </tr>
+                {% endfor %}
+                {% for action in file_info.actions_removed %}
+                <tr>
+                    <td><code>{{ action }}</code></td>
+                    <td class="removed">❌ Removed</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endfor %}
+
+        {% if validation_details and validation_details.check_1_resources and validation_details.check_1_resources.status == 'FAIL' %}
+        <p style="background-color: #fff3cd; padding: 10px; border-left: 4px solid #ffc107;">
+            <strong>Note:</strong> managed-cluster-config validation failed. The changes shown above are expected but may be missing in managed-cluster-config. See validation errors below.
+        </p>
+        {% endif %}
+        {% endif %}
+
         {% if comparison.actions.baseline_only %}
         <h3>Removed Actions</h3>
         <table>

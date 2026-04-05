@@ -18,6 +18,149 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 from common import log_info, log_success, log_error, log_warning, check_command
 from openshift_releases import resolve_baseline_version, resolve_target_version, extract_minor_version
 from reporters import generate_markdown_report, generate_html_report, generate_json_report
+from ack_validation import (
+    fetch_yaml_from_url,
+    calculate_expected_baseline,
+    validate_config_yaml,
+    validate_cloudcredential_yaml,
+    validate_sts_resources
+)
+
+
+def validate_sts_acknowledgment(baseline, target, comparison=None, baseline_cr_dir=None, target_cr_dir=None):
+    """
+    Comprehensive validation of STS acknowledgment in managed-cluster-config.
+
+    CHECK #1: Resources validation (resources/sts/{version}/)
+    CHECK #2: Admin acknowledgment validation (deploy/osd-cluster-acks/sts/{version}/)
+
+    Args:
+        baseline: Baseline version (e.g., "4.20.5")
+        target: Target version (e.g., "4.21.0")
+        comparison: Comparison result from comparing OCP releases (with actions.target_only, actions.baseline_only)
+
+    Returns:
+        dict with validation results for both checks
+    """
+    # Use minor versions
+    target_minor = extract_minor_version(target)
+    expected_baseline = calculate_expected_baseline(target_minor)
+
+    result = {
+        'valid': False,
+        'check_1_resources': {},
+        'check_2_admin_ack': {}
+    }
+
+    # ═══════════════════════════════════════════════════════════════
+    # CHECK #1: Resources Validation (resources/sts/{version}/)
+    # ═══════════════════════════════════════════════════════════════
+    log_info(f"CHECK #1: Validating resources/sts/{target_minor}/ directory...")
+
+    # Pass expected changes from OCP release comparison to validation
+    expected_changes = None
+    if comparison:
+        expected_changes = {
+            'actions_added': comparison['actions']['target_only'],
+            'actions_removed': comparison['actions']['baseline_only']
+        }
+
+    resources_result = validate_sts_resources(expected_baseline, target_minor, expected_changes, baseline_cr_dir, target_cr_dir)
+
+    result['check_1_resources'] = {
+        'status': 'PASS' if resources_result['valid'] else 'FAIL',
+        'valid': resources_result['valid'],
+        'errors': resources_result['errors'],
+        'file_count': len(resources_result.get('file_results', {})),
+        'changed_files': resources_result.get('changed_files', []),
+        'changed_files_count': resources_result.get('changed_files_count', 0)
+    }
+
+    check_1_valid = resources_result['valid']
+
+    # ═══════════════════════════════════════════════════════════════
+    # CHECK #2: Admin Acknowledgment Validation (deploy/osd-cluster-acks/sts/{version}/)
+    # ═══════════════════════════════════════════════════════════════
+    log_info(f"CHECK #2: Validating deploy/osd-cluster-acks/sts/{target_minor}/ acknowledgment...")
+
+    base_url = f"https://raw.githubusercontent.com/openshift/managed-cluster-config/master/deploy/osd-cluster-acks/sts/{target_minor}"
+
+    check_2_result = {
+        'status': 'PASS',
+        'valid': True,
+        'expected_baseline': expected_baseline,
+        'actual_baseline': None,
+        'files_checked': {},
+        'errors': []
+    }
+
+    # Check config.yaml
+    config_url = f"{base_url}/config.yaml"
+    config_result = {'exists': False, 'valid': False, 'errors': []}
+
+    try:
+        config_data = fetch_yaml_from_url(config_url)
+        if config_data is None:
+            config_result['errors'].append(f"File not found")
+            check_2_result['errors'].append("config.yaml not found")
+        else:
+            config_result['exists'] = True
+            is_valid, errors, actual_baseline = validate_config_yaml(
+                config_data,
+                expected_baseline,
+                selector_key="api.openshift.com/sts",
+                selector_value="true"
+            )
+            config_result['valid'] = is_valid
+            config_result['errors'] = errors
+            check_2_result['actual_baseline'] = actual_baseline
+
+            if not is_valid:
+                check_2_result['errors'].extend(errors)
+    except Exception as e:
+        config_result['errors'].append(f"Error: {e}")
+        check_2_result['errors'].append(f"config.yaml error: {e}")
+
+    check_2_result['files_checked']['config.yaml'] = config_result
+
+    # Check CloudCredential.yaml
+    cc_url = f"{base_url}/osd-sts-ack_CloudCredential.yaml"
+    cc_result = {'exists': False, 'valid': False, 'errors': []}
+
+    try:
+        cc_data = fetch_yaml_from_url(cc_url)
+        if cc_data is None:
+            cc_result['errors'].append(f"File not found")
+            check_2_result['errors'].append("osd-sts-ack_CloudCredential.yaml not found")
+        else:
+            cc_result['exists'] = True
+            is_valid, errors, actual_version = validate_cloudcredential_yaml(cc_data, target_minor)
+            cc_result['valid'] = is_valid
+            cc_result['errors'] = errors
+
+            if not is_valid:
+                check_2_result['errors'].extend(errors)
+    except Exception as e:
+        cc_result['errors'].append(f"Error: {e}")
+        check_2_result['errors'].append(f"CloudCredential error: {e}")
+
+    check_2_result['files_checked']['osd-sts-ack_CloudCredential.yaml'] = cc_result
+
+    check_2_valid = (
+        config_result.get('valid', False) and
+        cc_result.get('valid', False) and
+        len(check_2_result['errors']) == 0
+    )
+
+    check_2_result['valid'] = check_2_valid
+    check_2_result['status'] = 'PASS' if check_2_valid else 'FAIL'
+
+    result['check_2_admin_ack'] = check_2_result
+
+    # Overall validity - BOTH checks must pass
+    result['valid'] = check_1_valid and check_2_valid
+
+    return result
 
 
 def extract_credential_requests(version, cloud="aws"):
@@ -145,7 +288,7 @@ def convert_credential_requests_to_policy(cr_dir):
 
 
 def get_sts_policy(version):
-    """Get STS policy for a specific version."""
+    """Get STS policy for a specific version. Returns (policy, cr_dir)."""
     log_info(f"Fetching AWS STS policy for version {version}...")
 
     # Extract credential requests
@@ -156,17 +299,76 @@ def get_sts_policy(version):
     # Convert to policy
     policy = convert_credential_requests_to_policy(cr_dir)
 
-    # Clean up temp directory
-    import shutil
-    shutil.rmtree(cr_dir, ignore_errors=True)
-
     # Validate we got data
     if len(policy['Statement']) == 0:
         log_error("No statements found in extracted credential requests")
         sys.exit(1)
 
     log_success("Successfully extracted STS policy")
-    return policy
+    return policy, cr_dir
+
+
+def compare_credential_requests_per_file(baseline_dir, target_dir):
+    """Compare credential request files between baseline and target to detect per-file changes."""
+    import glob
+    try:
+        import yaml
+    except ImportError:
+        return []
+
+    changed_files = []
+
+    # Get all YAML files from both directories
+    baseline_files = {os.path.basename(f): f for f in glob.glob(os.path.join(baseline_dir, '*.yaml'))}
+    target_files = {os.path.basename(f): f for f in glob.glob(os.path.join(target_dir, '*.yaml'))}
+
+    # Check all files that exist in target
+    for filename in sorted(target_files.keys()):
+        target_file = target_files[filename]
+
+        # Extract actions from target file
+        target_actions = set()
+        try:
+            with open(target_file, 'r') as f:
+                cr = yaml.safe_load(f)
+            statement_entries = cr.get('spec', {}).get('providerSpec', {}).get('statementEntries', [])
+            for entry in statement_entries:
+                actions = entry.get('action') or entry.get('Action', [])
+                if isinstance(actions, str):
+                    actions = [actions]
+                target_actions.update(actions)
+        except:
+            continue
+
+        # Extract actions from baseline file (if exists)
+        baseline_actions = set()
+        if filename in baseline_files:
+            try:
+                with open(baseline_files[filename], 'r') as f:
+                    cr = yaml.safe_load(f)
+                statement_entries = cr.get('spec', {}).get('providerSpec', {}).get('statementEntries', [])
+                for entry in statement_entries:
+                    actions = entry.get('action') or entry.get('Action', [])
+                    if isinstance(actions, str):
+                        actions = [actions]
+                    baseline_actions.update(actions)
+            except:
+                pass
+
+        # Check if file changed
+        actions_added = sorted(target_actions - baseline_actions)
+        actions_removed = sorted(baseline_actions - target_actions)
+
+        if actions_added or actions_removed:
+            changed_files.append({
+                'filename': filename,
+                'actions_added': actions_added,
+                'actions_removed': actions_removed,
+                'actions_added_count': len(actions_added),
+                'actions_removed_count': len(actions_removed)
+            })
+
+    return changed_files
 
 
 def compare_sts_policies(baseline_policy, target_policy):
@@ -217,8 +419,8 @@ Examples:
   %(prog)s --baseline 4.21 --target 4.22 --verbose
 
 Exit Codes:
-  0 - Successful execution (regardless of whether differences were found)
-  1 - Execution failure (e.g., missing tools, network errors, invalid versions)
+  0 - Target version validation passed (PASS)
+  1 - Target version validation failed (FAIL) OR execution failure
         """
     )
 
@@ -252,13 +454,21 @@ Exit Codes:
     check_command('oc')
     check_command('jq')
 
-    # Fetch policies
-    baseline_policy = get_sts_policy(baseline)
-    target_policy = get_sts_policy(target)
+    # Fetch policies and keep credential request directories for per-file comparison
+    baseline_policy, baseline_cr_dir = get_sts_policy(baseline)
+    target_policy, target_cr_dir = get_sts_policy(target)
 
-    # Compare
+    # Compare overall policies
     log_info("Comparing STS policies...")
     comparison = compare_sts_policies(baseline_policy, target_policy)
+
+    # Compare per-file to detect which credential request files changed
+    log_info("Comparing credential request files...")
+    file_changes = compare_credential_requests_per_file(baseline_cr_dir, target_cr_dir)
+
+    # Add file changes to comparison result
+    comparison['file_changes'] = file_changes
+    comparison['file_changes_count'] = len(file_changes)
 
     # Check for differences
     added_count = len(comparison['actions']['target_only'])
@@ -269,6 +479,8 @@ Exit Codes:
         log_success(f"No policy differences found between {baseline} and {target}")
     else:
         log_info(f"Policy differences detected: {added_count} added, {removed_count} removed")
+        if file_changes:
+            log_info(f"Changes detected in {len(file_changes)} credential request file(s)")
 
     # Generate reports
     # Create report directory if it doesn't exist
@@ -276,11 +488,66 @@ Exit Codes:
     os.makedirs(report_dir, exist_ok=True)
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+
+    # Always validate target version structure (regardless of whether changes detected)
+    log_info("\nValidating target version structure in managed-cluster-config...")
+    validation_checked = True
+
+    # Pass the comparison result AND the OCP release temp directories to validate
+    validation_details = validate_sts_acknowledgment(baseline, target, comparison, baseline_cr_dir, target_cr_dir)
+
+    check_1 = validation_details['check_1_resources']
+    check_2 = validation_details['check_2_admin_ack']
+
+    target_minor = extract_minor_version(target)
+    mcc_sts_url = f"https://github.com/openshift/managed-cluster-config/tree/master/resources/sts/{target_minor}"
+    mcc_ack_url = f"https://github.com/openshift/managed-cluster-config/tree/master/deploy/osd-cluster-acks/sts/{target_minor}"
+
+    if validation_details['valid']:
+        validation_result = 'PASS'
+        log_success("=" * 60)
+        log_success("✓ VALIDATION PASSED - All checks successful")
+        log_success("=" * 60)
+        log_success(f"\nCHECK #1: Resources Validation [{check_1['status']}]")
+        log_success(f"  Location: {mcc_sts_url}")
+        log_success(f"  ✓ Validated {check_1['file_count']} policy file(s)")
+        if check_1['changed_files_count'] > 0:
+            log_success(f"  ✓ Changes detected in {check_1['changed_files_count']} file(s)")
+        log_success(f"\nCHECK #2: Admin Acknowledgment [{check_2['status']}]")
+        log_success(f"  Location: {mcc_ack_url}")
+        log_success(f"  ✓ config.yaml: baseline version {check_2['actual_baseline']} matches expected")
+        log_success(f"  ✓ CloudCredential: upgrade version validated")
+        log_success("")
+    else:
+        validation_result = 'FAIL'
+        log_error("=" * 60)
+        log_error("✗ VALIDATION FAILED")
+        log_error("=" * 60)
+
+        if check_1['status'] == 'FAIL':
+            log_error(f"\nCHECK #1: Resources Validation [FAIL]")
+            log_error(f"Location: {mcc_sts_url}")
+            log_error("")
+            for error in check_1['errors']:
+                log_error(f"{error}")
+            log_error("")
+
+        if check_2['status'] == 'FAIL':
+            log_error(f"CHECK #2: Admin Acknowledgment [FAIL]")
+            log_error(f"Location: {mcc_ack_url}")
+            log_error("")
+            for error in check_2['errors']:
+                log_error(f"{error}")
+            log_error("")
+
     report_data = {
         'type': 'AWS STS Policy Gap Analysis',
         'baseline': baseline,
         'target': target,
         'timestamp': datetime.now().isoformat(),
+        'validation_result': validation_result,
+        'validation_checked': validation_checked,
+        'validation_details': validation_details,
         'comparison': comparison,
         'summary': {
             'added': added_count,
@@ -308,8 +575,18 @@ Exit Codes:
         generate_html_report(report_data, html_file)
         log_info(f"HTML report generated: {html_file}")
 
-    # Always exit 0 on successful completion
-    sys.exit(0)
+    # Cleanup credential request directories
+    import shutil
+    shutil.rmtree(baseline_cr_dir, ignore_errors=True)
+    shutil.rmtree(target_cr_dir, ignore_errors=True)
+
+    # Exit based on validation result
+    if validation_result == 'FAIL':
+        log_error(f"\n❌ FAILED - Target version validation failed")
+        sys.exit(1)
+    else:
+        log_success(f"\n✅ PASSED - Target version structure validated")
+        sys.exit(0)
 
 
 if __name__ == '__main__':

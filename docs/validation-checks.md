@@ -1,0 +1,198 @@
+# Validation Checks
+
+The gap analysis framework performs 6 validation checks across all scripts.
+
+## Check Numbering
+
+All scripts use a consistent global check numbering system:
+
+| Check # | Category | Description | Pass/Fail Impact |
+|---------|----------|-------------|------------------|
+| **1** | AWS STS Resources | Validates STS policy files exist in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `resources/sts/{version}/` and match OCP release changes | Exit code 1 on FAIL |
+| **2** | AWS STS Admin Ack | Validates admin acknowledgment files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `deploy/osd-cluster-acks/sts/{version}/` | Exit code 1 on FAIL |
+| **3** | GCP WIF Resources | Validates WIF template (vanilla.yaml) in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `resources/wif/{version}/` and matches OCP release changes | Exit code 1 on FAIL |
+| **4** | GCP WIF Admin Ack | Validates admin acknowledgment files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `deploy/osd-cluster-acks/wif/{version}/` | Exit code 1 on FAIL |
+| **5** | OCP Admin Gates | Validates admin gates from cluster-version-operator are acknowledged in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `deploy/osd-cluster-acks/ocp/{version}/` | Exit code 1 on FAIL |
+| **6** | Feature Gates | Analyzes feature gate changes from Sippy API (informational only) | Always PASS (exit code 0) |
+
+## Check Execution by Script
+
+### gap-aws-sts.py
+- **Check 1:** AWS STS Resources Validation
+- **Check 2:** AWS STS Admin Acknowledgment
+
+### gap-gcp-wif.py
+- **Check 3:** GCP WIF Resources Validation
+- **Check 4:** GCP WIF Admin Acknowledgment
+
+### gap-ocp-gate-ack.py
+- **Check 5:** OCP Admin Gate Acknowledgments
+
+### gap-feature-gates.py
+- **Check 6:** Feature Gates Analysis (Informational)
+
+### gap-all.sh (Combined)
+Runs all checks in order:
+1. AWS STS (Checks 1-2)
+2. GCP WIF (Checks 3-4)
+3. OCP Admin Gates (Check 5)
+4. Feature Gates (Check 6) - Always executed last
+
+## Output Format
+
+All checks follow a consistent output format:
+
+### Success Output
+```
+============================================================
+✓ VALIDATION PASSED - All checks successful
+============================================================
+
+CHECK #X: [Check Name] [PASS]
+  Location: https://github.com/openshift/managed-cluster-config/tree/master/...
+  ✓ Details about what was validated
+  ✓ Additional success information
+```
+
+### Failure Output
+```
+============================================================
+✗ VALIDATION FAILED
+============================================================
+
+CHECK #X: [Check Name] [FAIL]
+Location: https://github.com/openshift/managed-cluster-config/tree/master/...
+
+[Detailed error messages with GitHub URLs]
+```
+
+## Validation Details
+
+### Check 1: AWS STS Resources
+
+**What it validates:**
+- Target version directory exists: `resources/sts/{version}/`
+- All policy files are valid JSON with required structure
+- Policy changes match OCP release credential request changes
+- No unexpected files added or removed
+- Actions (permissions) in managed-cluster-config match OCP release
+
+**Files checked:**
+- All JSON files dynamically discovered in `resources/sts/{version}/`
+- Typically 30+ policy files
+
+**Pass criteria:**
+- All policy files exist and are valid JSON
+- Policy changes match OCP release changes exactly
+- No missing or unexpected permissions
+
+### Check 2: AWS STS Admin Ack
+
+**What it validates:**
+- `config.yaml` exists and is valid
+- `config.yaml` has correct baseline version selector
+- `osd-sts-ack_CloudCredential.yaml` exists and is valid
+- CloudCredential has correct upgrade version annotation
+
+**Files checked:**
+- `deploy/osd-cluster-acks/sts/{version}/config.yaml`
+- `deploy/osd-cluster-acks/sts/{version}/osd-sts-ack_CloudCredential.yaml`
+
+**Pass criteria:**
+- Both files exist and are valid YAML
+- Baseline version matches expected (target - 1)
+- Upgrade version matches target version
+
+### Check 3: GCP WIF Resources
+
+**What it validates:**
+- Target version directory exists: `resources/wif/{version}/`
+- `vanilla.yaml` exists and is valid
+- WIF template has correct structure (id, kind, service_accounts)
+- GCP permissions in template match OCP release changes
+
+**Files checked:**
+- `resources/wif/{version}/vanilla.yaml`
+
+**Pass criteria:**
+- vanilla.yaml exists and is valid YAML
+- Template structure is correct
+- GCP permissions match OCP release changes
+
+### Check 4: GCP WIF Admin Ack
+
+**What it validates:**
+- `config.yaml` exists and is valid
+- `config.yaml` has correct baseline version selector
+- `osd-wif-ack_CloudCredential.yaml` exists and is valid
+- CloudCredential has correct upgrade version annotation
+
+**Files checked:**
+- `deploy/osd-cluster-acks/wif/{version}/config.yaml`
+- `deploy/osd-cluster-acks/wif/{version}/osd-wif-ack_CloudCredential.yaml`
+
+**Pass criteria:**
+- Both files exist and are valid YAML
+- Baseline version matches expected (target - 1)
+- Upgrade version matches target version
+
+### Check 5: OCP Admin Gates
+
+**What it validates:**
+- Admin gates from baseline version are acknowledged in target version
+- Acknowledgment ConfigMap exists if gates are present
+- All required gates are acknowledged
+- `config.yaml` has correct baseline version
+
+**Files checked:**
+- Admin gates from: `github.com/openshift/cluster-version-operator/release-{version}/...`
+- Acknowledgments from: `deploy/osd-cluster-acks/ocp/{version}/admin-ack.yaml`
+- Config from: `deploy/osd-cluster-acks/ocp/{version}/config.yaml`
+
+**Pass criteria:**
+- If no admin gates in baseline: PASS (no acks required)
+- If admin gates exist: All gates must be acknowledged
+- config.yaml must be valid with correct baseline version
+
+### Check 6: Feature Gates
+
+**What it analyzes:**
+- New feature gates added
+- Feature gates removed
+- Feature gates newly enabled by default
+- Feature gates removed from default
+
+**Data source:**
+- Sippy API: `https://sippy.dptools.openshift.org/api/feature_gates?release={version}`
+
+**Pass criteria:**
+- Always PASS (informational only)
+- Analysis completes successfully
+- Changes are tracked but do not affect exit code
+
+## Exit Codes
+
+### Individual Scripts (gap-aws-sts.py, gap-gcp-wif.py, gap-ocp-gate-ack.py)
+- **Exit 0 (PASS):** All relevant checks passed
+- **Exit 1 (FAIL):** One or more checks failed OR execution error
+
+### Feature Gates Script (gap-feature-gates.py)
+- **Exit 0 (PASS):** Always (informational only)
+- **Exit 1 (FAIL):** Only on execution error (network, invalid version, etc.)
+
+### Combined Script (gap-all.sh)
+- **Exit 0 (PASS):** All checks 1-5 passed (check 6 is informational)
+- **Exit 1 (FAIL):** Any of checks 1-5 failed OR execution error
+
+## CI/CD Integration
+
+The check numbering is consistent across:
+- Console output
+- Report files (Markdown, HTML, JSON)
+- Exit codes
+- Log messages
+
+This allows CI/CD systems to reliably:
+- Parse specific check results from logs
+- Identify which validation failed
+- Link directly to [managed-cluster-config](https://github.com/openshift/managed-cluster-config) files needing updates

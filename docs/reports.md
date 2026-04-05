@@ -35,7 +35,9 @@ gap-analysis-full_4.20_to_4.21_20260325_153500.json
 
 ## Individual Script Reports
 
-### AWS STS Gap Analysis
+All reports follow the global 6-check validation system. See [Validation Checks](validation-checks.md) for details.
+
+### AWS STS Gap Analysis (Checks 1-2)
 
 ```bash
 python3 scripts/gap-aws-sts.py --baseline 4.20 --target 4.21
@@ -47,12 +49,16 @@ Generates:
 - `gap-analysis-aws-sts_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
 
 **Report Contents:**
+- **Check 1:** AWS STS Resources validation results
+- **Check 2:** AWS STS Admin Ack validation results
 - Added IAM actions/permissions
 - Removed IAM actions/permissions
+- **Changed Files**: Lists specific credential request files that changed with per-file diffs
 - Total changes summary
+- Validation results for [managed-cluster-config](https://github.com/openshift/managed-cluster-config)
 - Timestamp and version information
 
-### GCP WIF Gap Analysis
+### GCP WIF Gap Analysis (Checks 3-4)
 
 ```bash
 python3 scripts/gap-gcp-wif.py --baseline 4.20 --target 4.21
@@ -64,12 +70,35 @@ Generates:
 - `gap-analysis-gcp-wif_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
 
 **Report Contents:**
+- **Check 3:** GCP WIF Resources validation results
+- **Check 4:** GCP WIF Admin Ack validation results
 - Added GCP IAM permissions
 - Removed GCP IAM permissions
+- **Changed Files**: Lists specific credential request files that changed with per-file diffs
 - Total changes summary
+- Validation results for [managed-cluster-config](https://github.com/openshift/managed-cluster-config)
 - Timestamp and version information
 
-### Feature Gate Gap Analysis
+### OCP Admin Gate Acknowledgment Analysis (Check 5)
+
+```bash
+python3 scripts/gap-ocp-gate-ack.py --baseline 4.20 --target 4.21
+```
+
+Generates:
+- `gap-analysis-ocp-gate-ack_4.20_to_4.21_YYYYMMDD_HHMMSS.md`
+- `gap-analysis-ocp-gate-ack_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
+- `gap-analysis-ocp-gate-ack_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+
+**Report Contents:**
+- **Check 5:** OCP Admin Gates validation results
+- Admin gates requiring acknowledgment
+- Acknowledged gates
+- Unacknowledged gates
+- config.yaml validation results
+- Timestamp and version information
+
+### Feature Gate Gap Analysis (Check 6 - Informational)
 
 ```bash
 python3 scripts/gap-feature-gates.py --baseline 4.20 --target 4.21
@@ -81,6 +110,7 @@ Generates:
 - `gap-analysis-feature-gates_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
 
 **Report Contents:**
+- **Check 6:** Feature Gates analysis (informational only, always PASS)
 - New feature gates
 - Removed feature gates
 - Newly enabled by default
@@ -88,7 +118,7 @@ Generates:
 - Total changes summary
 - Timestamp and version information
 
-## Combined Report (gap-all.sh)
+## Combined Report (gap-all.sh) - All 6 Checks
 
 When running the full gap analysis orchestrator:
 
@@ -102,12 +132,21 @@ bash scripts/gap-all.sh --baseline 4.20 --target 4.21
 - `gap-analysis-full_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
 - `gap-analysis-full_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
 
-**Combined Report Contents:**
-- AWS STS analysis summary
-- GCP WIF analysis summary
-- Feature Gates analysis summary
+**Combined Report Contents (All 6 Checks):**
+- **Check 1:** AWS STS Resources validation
+- **Check 2:** AWS STS Admin Ack validation
+- **Check 3:** GCP WIF Resources validation
+- **Check 4:** GCP WIF Admin Ack validation
+- **Check 5:** OCP Admin Gates validation
+- **Check 6:** Feature Gates analysis (informational)
 - Aggregate statistics
 - Timestamp and version information
+
+**Execution Order:**
+1. AWS STS (Checks 1-2)
+2. GCP WIF (Checks 3-4)
+3. OCP Admin Gates (Check 5)
+4. Feature Gates (Check 6) - Always executed last
 
 ## Viewing Reports
 

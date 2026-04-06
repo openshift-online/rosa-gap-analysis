@@ -1,0 +1,136 @@
+#!/bin/bash
+# Pre-commit hook: Validate gap analysis repository consistency
+# Silent on success, outputs only errors to stderr
+
+set -euo pipefail
+
+# Track validation status
+VALIDATION_FAILED=false
+
+# Get repository root
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || {
+    echo "ERROR: Not in a git repository" >&2
+    exit 1
+}
+cd "$REPO_ROOT"
+
+# ============================================================================
+# CHECK 1: Validate Python syntax
+# ============================================================================
+PYTHON_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+if [ -n "$PYTHON_FILES" ]; then
+    for file in $PYTHON_FILES; do
+        if [ -f "$file" ]; then
+            if ! python3 -m py_compile "$file" 2>/dev/null; then
+                echo "ERROR: Python syntax error in $file" >&2
+                VALIDATION_FAILED=true
+            fi
+        fi
+    done
+fi
+
+# ============================================================================
+# CHECK 2: Validate Bash syntax
+# ============================================================================
+BASH_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.sh$' || true)
+if [ -n "$BASH_FILES" ]; then
+    for file in $BASH_FILES; do
+        if [ -f "$file" ]; then
+            if ! bash -n "$file" 2>/dev/null; then
+                echo "ERROR: Bash syntax error in $file" >&2
+                VALIDATION_FAILED=true
+            fi
+        fi
+    done
+fi
+
+# ============================================================================
+# CHECK 3: Validate gap script completeness
+# ============================================================================
+GAP_SCRIPTS=$(git diff --cached --name-only --diff-filter=ACM | grep 'scripts/gap-.*\.py$' || true)
+if [ -n "$GAP_SCRIPTS" ]; then
+    for script in $GAP_SCRIPTS; do
+        script_name=$(basename "$script" .py | sed 's/gap-//')
+        md_template="scripts/templates/${script_name}.md.j2"
+        html_template="scripts/templates/${script_name}.html.j2"
+
+        if [ ! -f "$md_template" ]; then
+            echo "ERROR: Missing $md_template for $script" >&2
+            VALIDATION_FAILED=true
+        fi
+
+        if [ ! -f "$html_template" ]; then
+            echo "ERROR: Missing $html_template for $script" >&2
+            VALIDATION_FAILED=true
+        fi
+    done
+fi
+
+# ============================================================================
+# CHECK 4: Validate gap-all.sh orchestration
+# ============================================================================
+if git diff --cached --name-only | grep -q 'scripts/gap-all.sh'; then
+    if ! grep -B 2 "Feature Gates Gap Analysis" scripts/gap-all.sh | grep -qi "always.*last"; then
+        echo "WARN: Verify feature gates still runs LAST in gap-all.sh" >&2
+    fi
+
+    gap_script_count=$(find scripts -maxdepth 1 -name 'gap-*.py' -type f | wc -l)
+    orchestrator_calls=$(grep -c "python3.*gap-.*\.py" scripts/gap-all.sh || echo 0)
+
+    if [ "$gap_script_count" -ne "$orchestrator_calls" ]; then
+        echo "ERROR: Found $gap_script_count gap scripts but only $orchestrator_calls calls in gap-all.sh" >&2
+        VALIDATION_FAILED=true
+    fi
+fi
+
+# ============================================================================
+# CHECK 5: Prevent committing reports
+# ============================================================================
+REPORT_FILES=$(git diff --cached --name-only | grep '^reports/' || true)
+if [ -n "$REPORT_FILES" ]; then
+    echo "ERROR: Report files should not be committed:" >&2
+    echo "$REPORT_FILES" >&2
+    VALIDATION_FAILED=true
+fi
+
+# ============================================================================
+# CHECK 6: Validate Python import patterns
+# ============================================================================
+if [ -n "$PYTHON_FILES" ]; then
+    for file in $PYTHON_FILES; do
+        if [[ "$file" == scripts/gap-*.py ]]; then
+            if ! grep -q "sys.path.insert(0, str(Path(__file__).parent / 'lib'))" "$file"; then
+                echo "WARN: $file may be missing standard lib import pattern" >&2
+            fi
+        fi
+    done
+fi
+
+# ============================================================================
+# CHECK 7: Validate Jinja2 templates
+# ============================================================================
+TEMPLATE_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.j2$' || true)
+if [ -n "$TEMPLATE_FILES" ]; then
+    for template in $TEMPLATE_FILES; do
+        if [ -f "$template" ]; then
+            if ! python3 -c "from jinja2 import Template; Template(open('$template').read())" 2>/dev/null; then
+                echo "ERROR: Jinja2 syntax error in $template" >&2
+                VALIDATION_FAILED=true
+            fi
+        fi
+    done
+fi
+
+# ============================================================================
+# Summary
+# ============================================================================
+if [ "$VALIDATION_FAILED" = true ]; then
+    echo "" >&2
+    echo "Pre-commit validation FAILED" >&2
+    echo "Fix the errors above and try again." >&2
+    echo "To bypass: git commit --no-verify" >&2
+    exit 1
+fi
+
+# Silent success (exit 0, no output)
+exit 0

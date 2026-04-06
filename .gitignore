@@ -4,7 +4,7 @@
 *.tmp
 *.log
 
-# Python cache (for scripts/lib/parse-credentials-request.py)
+# Python cache
 __pycache__/
 *.pyc
 *.pyo
@@ -18,3 +18,6 @@ __pycache__/
 
 # Reports
 reports/
+
+# Claude local settings (user-specific)
+.claude/settings.local.json

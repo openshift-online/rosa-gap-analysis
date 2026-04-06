@@ -2,10 +2,10 @@
 # OpenShift Release Information Library
 # Functions to query OpenShift release data from Sippy and OCP releases
 
-# Source common utilities if available
+# Source logging utilities if available
 _OPENSHIFT_RELEASES_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${_OPENSHIFT_RELEASES_SCRIPT_DIR}/common.sh" ]]; then
-    source "${_OPENSHIFT_RELEASES_SCRIPT_DIR}/common.sh"
+if [[ -f "${_OPENSHIFT_RELEASES_SCRIPT_DIR}/logging.sh" ]]; then
+    source "${_OPENSHIFT_RELEASES_SCRIPT_DIR}/logging.sh"
 fi
 
 # API endpoints
@@ -38,55 +38,6 @@ extract_version_from_stable() {
     local stable="$1"
     # Extract major.minor from stable version (e.g., "4.21.6" -> "4.21")
     echo "$stable" | sed -E 's/^([0-9]+\.[0-9]+)\..*/\1/'
-}
-
-# Validate that dev version is exactly 1 minor version ahead of GA
-# Usage: validate_version_gap <ga_version> <dev_version>
-# Arguments:
-#   $1 - GA version (e.g., "4.21")
-#   $2 - Dev version (e.g., "4.22")
-# Returns: 0 if valid (dev = ga + 1), 1 otherwise
-validate_version_gap() {
-    local ga_version="$1"
-    local dev_version="$2"
-
-    if [[ -z "$ga_version" ]] || [[ -z "$dev_version" ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Both GA and dev versions required for validation"
-        else
-            echo "Error: Both GA and dev versions required for validation" >&2
-        fi
-        return 1
-    fi
-
-    local ga_minor=$(extract_minor_version "$ga_version")
-    local dev_minor=$(extract_minor_version "$dev_version")
-    local diff=$((dev_minor - ga_minor))
-
-    if [[ $diff -eq 0 ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Dev version ($dev_version) is the same as GA version ($ga_version)"
-        else
-            echo "Error: Dev version ($dev_version) is the same as GA version ($ga_version)" >&2
-        fi
-        return 1
-    elif [[ $diff -lt 0 ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Dev version ($dev_version) is older than GA version ($ga_version)"
-        else
-            echo "Error: Dev version ($dev_version) is older than GA version ($ga_version)" >&2
-        fi
-        return 1
-    elif [[ $diff -gt 1 ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Dev version ($dev_version) is $diff versions ahead of GA ($ga_version), expected exactly 1"
-        else
-            echo "Error: Dev version ($dev_version) is $diff versions ahead of GA ($ga_version), expected exactly 1" >&2
-        fi
-        return 1
-    fi
-
-    return 0
 }
 
 # Validate that candidate version belongs to the expected version
@@ -261,54 +212,6 @@ get_latest_candidate_version() {
     fi
 
     echo "$latest_candidate"
-    return 0
-}
-
-# Get all candidate versions from dev-preview stream
-# Filters to only return candidates for dev version (GA+1)
-# Usage: get_all_candidate_versions
-# Returns: JSON array of candidate version names or empty on failure
-# Exit: 0 on success, 1 on failure
-get_all_candidate_versions() {
-    local api_url
-    local dev_version
-    local all_tags
-    local filtered_candidates
-
-    # Get dev version first to filter candidates
-    dev_version=$(get_latest_dev_version) || return 1
-
-    # Build API URL for dev-preview stream (amd64)
-    api_url="${RELEASE_STREAM_BASE}/${DEV_PREVIEW_STREAM}/tags"
-
-    # Fetch all tag names
-    all_tags=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r '[.tags[].name]' 2>/dev/null)
-
-    if [[ -z "$all_tags" ]] || [[ "$all_tags" == "null" ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch candidate versions from ${DEV_PREVIEW_STREAM} stream"
-        else
-            echo "Error: Failed to fetch candidate versions from ${DEV_PREVIEW_STREAM} stream" >&2
-        fi
-        return 1
-    fi
-
-    # Filter candidates to only include those for dev version
-    # Example: if dev is "4.22", only include candidates starting with "4.22."
-    filtered_candidates=$(echo "$all_tags" | jq -r --arg ver "$dev_version" \
-        '[.[] | select(startswith($ver + "."))]')
-
-    if [[ -z "$filtered_candidates" ]] || [[ "$filtered_candidates" == "[]" ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "No candidate versions found for dev version ${dev_version} in ${DEV_PREVIEW_STREAM} stream"
-        else
-            echo "Error: No candidate versions found for dev version ${dev_version}" >&2
-        fi
-        return 1
-    fi
-
-    echo "$filtered_candidates"
     return 0
 }
 
@@ -493,59 +396,6 @@ get_latest_nightly_pullspec() {
     return 0
 }
 
-# Get all GA versions
-# Usage: get_all_ga_versions
-# Returns: JSON array of GA versions
-# Exit: 0 on success, 1 on failure
-get_all_ga_versions() {
-    local versions
-
-    versions=$(curl -s --fail "${SIPPY_API}" 2>/dev/null | \
-        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber))' 2>/dev/null)
-
-    if [[ -z "$versions" ]] || [[ "$versions" == "null" ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch GA versions from Sippy API"
-        else
-            echo "Error: Failed to fetch GA versions" >&2
-        fi
-        return 1
-    fi
-
-    echo "$versions"
-    return 0
-}
-
-# Check if a version is GA
-# Usage: is_ga_version <version>
-# Arguments:
-#   $1 - Version to check (e.g., "4.21")
-# Returns: 0 if GA, 1 if not GA or on error
-is_ga_version() {
-    local version="$1"
-    local ga_versions
-
-    if [[ -z "$version" ]]; then
-        return 1
-    fi
-
-    ga_versions=$(get_all_ga_versions) || return 1
-
-    echo "$ga_versions" | jq -e --arg v "$version" 'index($v) != null' &>/dev/null
-    return $?
-}
-
-# Get nightly build for the latest GA version
-# Usage: get_latest_ga_nightly
-# Returns: Pull spec for latest GA version's nightly build
-# Exit: 0 on success, 1 on failure
-get_latest_ga_nightly() {
-    local ga_version
-
-    ga_version=$(get_latest_ga_version) || return 1
-    get_latest_nightly_pullspec "$ga_version"
-}
-
 # Get the latest nightly version tag for dev version
 # Usage: get_latest_dev_nightly_version
 # Returns: Nightly version tag (e.g., "4.22.0-0.nightly-2026-03-13-184504")
@@ -595,20 +445,15 @@ get_latest_dev_nightly_pullspec() {
 export -f extract_minor_version
 export -f extract_version_from_candidate
 export -f extract_version_from_stable
-export -f validate_version_gap
 export -f validate_candidate_belongs_to_version
 export -f validate_stable_belongs_to_version
 export -f get_latest_ga_version
 export -f get_latest_dev_version
 export -f get_latest_candidate_version
 export -f get_latest_candidate_pullspec
-export -f get_all_candidate_versions
 export -f get_latest_stable_version
 export -f get_latest_stable_pullspec
 export -f get_latest_nightly_pullspec
-export -f get_all_ga_versions
-export -f is_ga_version
-export -f get_latest_ga_nightly
 export -f get_latest_dev_nightly_version
 export -f get_latest_dev_nightly_pullspec
 
@@ -697,12 +542,11 @@ Additional functions available when sourced:
   - get_latest_candidate_version
   - get_latest_dev_nightly_version
   - get_latest_dev_nightly_pullspec
-  - get_all_candidate_versions
-  - get_all_ga_versions
-  - is_ga_version
-  - validate_version_gap
   - validate_candidate_belongs_to_version
   - validate_stable_belongs_to_version
+  - extract_minor_version
+  - extract_version_from_candidate
+  - extract_version_from_stable
 
 EOF
             exit 0

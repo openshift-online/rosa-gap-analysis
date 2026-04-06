@@ -10,6 +10,7 @@ compatibility:
   required_tools:
     - python3
     - oc (OpenShift CLI - for extracting credential requests)
+    - jq (for JSON processing)
     - PyYAML (for YAML processing)
 ---
 

@@ -113,7 +113,7 @@ trigger_job() {
 
     # Extract HTTP status code from last line
     http_code=$(echo "${response}" | tail -n1)
-    response=$(echo "${response}" | head -n-1)
+    response=$(echo "${response}" | sed '$d')
 
     # Check HTTP status code
     if [ "${http_code}" -ne 200 ] && [ "${http_code}" -ne 201 ]; then

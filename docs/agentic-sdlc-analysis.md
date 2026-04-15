@@ -257,7 +257,7 @@ Fix before commit, not after CI failure
 **Reason:** This is an analysis tool, not a deployed service.
 
 **Partial Automation:**
-- CI/CD integration via Prow (ci/run-prow-job.sh)
+- CI/CD integration via Prow (ci/prow/trigger-job.sh)
 - Containerized execution (ci/Containerfile)
 
 ---

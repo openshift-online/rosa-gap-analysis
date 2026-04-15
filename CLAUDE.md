@@ -44,7 +44,7 @@ Claude follows an impact-based approach in this repository:
 **3-Layer Design:**
 1. Individual analyzers (`scripts/gap-*.py`) - AWS STS, GCP WIF, Feature Gates, OCP Admin Gates
 2. Orchestrator (`scripts/gap-all.sh`) - Runs all analyzers, generates combined reports
-3. Shared libraries (`scripts/lib/`) - Version resolution, validation, reporting
+3. Shared libraries (`scripts/lib/`, `ci/lib/`) - Version resolution, validation, reporting, CI utilities
 
 **Data Sources:**
 - `oc adm release extract --credentials-requests` → extracts CredentialsRequest manifests from OCP releases
@@ -77,7 +77,15 @@ podman build -f ci/Containerfile -t gap-analysis:dev .
 podman run --rm gap-analysis:dev gap-all.sh --baseline 4.21 --target 4.22
 
 # Manual Prow job trigger
-./ci/run-prow-job.sh -w
+./ci/trigger-prow-job.sh -w
+
+# Analyze failure and create PR (back-to-back workflow)
+WORK_DIR=$(./ci/analyze-prow-failure.sh --keep-work-dir | tail -1) && \
+  ./ci/fix-prow-failure.sh --work-dir "$WORK_DIR" --create-pr
+
+# Manual review workflow with persistent directory
+./ci/analyze-prow-failure.sh --work-dir ~/prow-analysis
+./ci/fix-prow-failure.sh --work-dir ~/prow-analysis --create-pr
 ```
 
 ## Validation Checks
@@ -96,10 +104,8 @@ podman run --rm gap-analysis:dev gap-all.sh --baseline 4.21 --target 4.22
 ## Critical Implementation Details
 
 **gap-all.sh orchestrator:**
-- Sets `GAP_FULL_REPORT=1` env var to skip individual MD/HTML reports (only JSON generated)
-- Feature gates analysis ALWAYS runs last (even if new checks added in future)
-- Calls `generate-combined-report.py` to aggregate individual JSONs into combined report
-- Exit 1 if any check fails OR execution error occurs
+- Sets `GAP_FULL_REPORT=1` to skip individual MD/HTML (generates JSON only)
+- Feature gates runs last, aggregates reports via `generate-combined-report.py`, exits 1 on failures
 
 **Version resolution (openshift_releases.py/sh):**
 - Auto-detect: queries Sippy API for latest stable (baseline) and candidate (target)
@@ -116,10 +122,6 @@ podman run --rm gap-analysis:dev gap-all.sh --baseline 4.21 --target 4.22
 - Templates in `scripts/templates/*.{md,html}.j2`
 - Timestamped filenames: `gap-analysis-{type}_{baseline}_to_{target}_{timestamp}.{ext}`
 - Combined report aggregates all individual JSON reports
-
-**Credential request parsing (parse-credentials-request.py):**
-- AWS: extracts `spec.providerSpec.statementEntries` (IAM actions)
-- GCP: extracts `spec.providerSpec.permissions` (GCP permissions)
 
 **Python import pattern (all scripts):**
 ```python
@@ -148,10 +150,29 @@ from reporters import generate_markdown_report, generate_html_report, generate_j
 - Scripts execute directly (no repo clone needed)
 - Reports saved to `${ARTIFACT_DIR}` if specified via `REPORT_DIR` env var
 
-**Manual trigger (ci/run-prow-job.sh):**
+**Manual trigger (ci/trigger-prow-job.sh):**
 - Requires auth to OpenShift CI cluster
-- `-w` flag polls for completion
-- Validates job existence via Gangway API
+- Uses Gangway API for triggering jobs (write operations)
+- `-w` flag polls for completion via Prow deck API
+
+**Failure analyzer (ci/analyze-prow-failure.sh):**
+- Queries Prow deck API for latest FAILED job, downloads artifacts from GCS
+- Checks 5 most recent jobs; exits gracefully if all successful
+- Parses JSON report → extracts validation failures (CHECK #1-5) → generates fix content
+- Work directory: `/tmp/gap-analysis-*` (temp) or `--work-dir` (persistent)
+- Outputs failure-summary.md with missing files, permission changes, exact fix content
+- Libraries: prow-api.sh, failure-parser.sh, generate-fixes.py, validate-wif-template.sh
+
+**PR creator (ci/fix-prow-failure.sh):**
+- Generates files → validates (JSON, YAML, WIF via `validate-wif-template.sh`) → creates PR
+- WIF validation: service account ID (max 25 chars), role ID (max 50 chars), format checks; requires `yq`
+- Work directory: requires `--work-dir`; auto-cleanup for temp dirs, preserves user-specified paths
+- PR template (`ci/templates/pr-body.md`): URLs (Prow job, HTML report), versions, failure summary, file counts, permission changes per-file
+- AWS permissions: shows per-file added/removed actions in PR description
+- Conditional OCP acks: skips config.yaml if no gates found
+- File staging: commits ALL files (gap-analysis + make-generated), PR description lists only gap-analysis files
+- Workflow: clone fork → create branch `ocp-X.XX-gap-analysis-update` → generate → make → commit → PR
+- Prevents duplicate PRs by checking existing branch
 
 ## Development
 
@@ -176,10 +197,17 @@ from reporters import generate_markdown_report, generate_html_report, generate_j
 
 ## Runtime Dependencies
 
+**Core analysis:**
 - `oc` (OpenShift CLI)
 - `python3`
 - `PyYAML` (`pip install pyyaml`)
 - `curl` (Sippy API)
 - `jq` (bash JSON parsing)
+
+**CI/failure analysis:**
+- `gcloud` (GCS artifact downloads via `gcloud storage cp`)
+
+**PR creation (fix-prow-failure.sh):**
+- `yq` (WIF template validation) - https://github.com/mikefarah/yq
 
 No requirements.txt - dependencies installed manually or in Containerfile.

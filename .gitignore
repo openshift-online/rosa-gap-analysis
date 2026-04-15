@@ -19,5 +19,11 @@ __pycache__/
 # Reports
 reports/
 
+# CI artifacts (only used if user explicitly specifies --work-dir ./ci/artifacts)
+ci/artifacts/
+
 # Claude local settings (user-specific)
 .claude/settings.local.json
+
+# GitHub PR configuration (contains bot settings)
+.github-pr-config

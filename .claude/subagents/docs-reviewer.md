@@ -46,6 +46,13 @@ When gap scripts or validation logic changes, I check:
    - Template requirements are accurate
    - Integration steps are complete
 
+6. **docs/agentic-sdlc-analysis.md:**
+   - Living document tracking agentic SDLC implementation
+   - Update automation metrics when workflows change
+   - Update SDLC phase analysis when subagents/rules change
+   - Refresh analysis date when significant updates occur
+   - Keep in repo (NOT for removal/archiving)
+
 ## Trigger Conditions
 
 I auto-trigger when:

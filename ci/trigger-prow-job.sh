@@ -3,9 +3,10 @@
 set -euo pipefail
 
 # =============================================================================
-# Script: run-prow-job.sh
+# Script: trigger-job.sh
 # Description: Trigger and monitor OpenShift CI Prow jobs via Gangway API
 # Authentication: https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/display
+# Usage: ./ci/prow/trigger-job.sh [OPTIONS]
 # =============================================================================
 
 # Configuration

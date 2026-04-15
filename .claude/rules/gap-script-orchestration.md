@@ -298,7 +298,7 @@ Before committing changes involving gap scripts:
 
 ```bash
 # Verify all dependencies for a script are in place
-./ci/run-prow-job.sh -j <job-name>  # Test in CI
+./ci/prow/trigger-job.sh -j <job-name>  # Test in CI
 
 # Check template syntax
 python3 -c "from jinja2 import Template; Template(open('scripts/templates/new.md.j2').read())"

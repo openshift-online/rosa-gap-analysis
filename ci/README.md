@@ -217,9 +217,250 @@ The container image has the following structure:
 - Override with `--report-dir` flag or `REPORT_DIR` environment variable
 - Reports include MD (human-readable), HTML (web-viewable), and JSON (machine-readable) formats
 
+## CI Organization
+
+The `ci/` directory is organized into functional subdirectories:
+
+```
+ci/
+├── analyze-prow-failure.sh     # Analyze failed jobs
+├── fix-prow-failure.sh          # Generate fixes and create PRs
+├── trigger-prow-job.sh          # Manually trigger Prow jobs
+├── lib/                         # Shared CI libraries
+│   ├── prow-api.sh              # Prow deck API functions
+│   ├── failure-parser.sh        # JSON report parsing
+│   ├── generate-fixes.py        # File content generation
+│   └── validate-wif-template.sh # WIF template validation
+├── templates/                   # PR description templates
+│   └── pr-body.md               # PR template with placeholders
+├── artifacts/                   # Downloaded artifacts (gitignored)
+└── Containerfile                # CI build root image
+```
+
+### Integration
+
+- **analyze-prow-failure.sh**: Downloads artifacts, parses failures, generates summary
+- **fix-prow-failure.sh**: Generates fixes, validates, creates PR to managed-cluster-config
+- **trigger-prow-job.sh**: Triggers Prow jobs via Gangway API
+
+## Analyzing CI Failures
+
+The `prow/analyze-failure.sh` script automatically analyzes failed Prow jobs and generates PR requirements for managed-cluster-config.
+
+### Prerequisites
+
+1. **Required tools**: `oc`, `jq`, `gcloud`
+   - `oc`: OpenShift CLI (for authentication validation)
+   - `jq`: JSON processor
+   - `gcloud`: Google Cloud SDK (for artifact downloads via `gcloud storage cp`)
+     - Install from: https://cloud.google.com/sdk/docs/install
+2. **Authentication**: The script validates authentication via `oc whoami` but Prow deck API calls don't require an authentication token. Authenticate to OpenShift CI cluster at:
+   ```
+   https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/display
+   ```
+
+### Usage
+
+```bash
+./ci/prow/analyze-failure.sh [OPTIONS]
+```
+
+**Options:**
+- `-j, --job-name NAME` - Specify the Prow job name to analyze (default: `periodic-ci-openshift-online-rosa-gap-analysis-main-nightly`)
+- `-i, --job-id ID` - Analyze a specific job by ID (skips top-5 job check)
+- `-h, --help` - Display help message
+
+### What It Does
+
+1. **Finds latest FAILED job** - Checks top 5 recent jobs for failures; exits gracefully if all are successful/pending
+2. **Downloads artifacts** - Uses `gcloud storage cp -r` to download entire job directory from GCS to `ci/artifacts/`
+3. **Extracts reports** - Finds gap-analysis reports in `artifacts/test/artifacts/rosa-gap-analysis-reports/`
+4. **Parses failures** - Extracts validation errors from CHECK #1-5
+5. **Generates failure summary** - Creates `ci/artifacts/failure-summary.md` with validation failures
+
+### Behavior
+
+- **Top 5 check**: Only checks the 5 most recent job executions for failures
+- **Graceful exit**: If all top 5 jobs are successful or pending, exits with informational message
+- **Artifact download**: Downloads entire job directory using `gcloud storage cp -r`
+- **Specific job analysis**: Use `--job-id` flag to analyze a specific failed job (bypasses top-5 check)
+- **Artifact retry**: If a failed job has no artifacts, tries the next failed job in top 5
+
+### Examples
+
+**Example 1: Analyze latest failed job (checks top 5)**
+```bash
+./ci/prow/analyze-failure.sh
+
+# Output when failures found:
+# [INFO] Gap Analysis Failure Analyzer
+# ======================================================================
+# [INFO] Authenticated as: user@redhat.com
+# [INFO] Finding latest failed job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly (checking top 5 jobs)...
+# [INFO] Trying failed job: 2041035894848229376
+# {
+#   "id": "2041035894848229376",
+#   "job_status": "failure",
+#   "started": "2026-04-06T06:10:49Z",
+#   "finished": "2026-04-06T06:17:27Z"
+# }
+# [INFO] Downloading job artifacts for 2041035894848229376...
+# [INFO] Downloading from GCS: gs://test-platform-results/logs/.../2041035894848229376/
+# [INFO] Finding gap-analysis reports in downloaded artifacts...
+# [SUCCESS] Copied: gap-analysis-full_4.21.9_to_4.22.0-ec.4_20260406_061719.json
+# [SUCCESS] Copied: gap-analysis-full_4.21.9_to_4.22.0-ec.4_20260406_061719.html
+# [SUCCESS] Downloaded 2 gap-analysis report(s)
+# [SUCCESS] Found failed job with artifacts: 2041035894848229376
+# [INFO] Analyzing gap analysis report...
+# [INFO] Found report: ci/artifacts/gap-analysis-full_4.21.9_to_4.22.0-ec.4_20260406_061719.json
+# [INFO] Baseline: 4.21.9
+# [INFO] Target: 4.22.0-ec.4
+# [INFO] Generating failure summary...
+# [SUCCESS] Failure summary generated: ci/artifacts/failure-summary.md
+#
+# ======================================================================
+# [Summary output displayed here]
+# ======================================================================
+#
+# [SUCCESS] ======================================================================
+# [SUCCESS] ✅ Analysis complete!
+# [SUCCESS] ======================================================================
+# [SUCCESS] Artifacts downloaded: ci/artifacts/
+# [SUCCESS] Failure summary: ci/artifacts/failure-summary.md
+```
+
+**Example 2: All recent jobs successful (graceful exit)**
+```bash
+./ci/prow/analyze-failure.sh
+
+# Output:
+# [INFO] Finding latest failed job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly (checking top 5 jobs)...
+# [SUCCESS] ✅ No failed jobs in the last 5 executions
+# [INFO] 
+# [INFO] Recent job statuses:
+#   - Job 2043621071365607424: success
+#   - Job 2043335702826917888: success
+#   - Job 2043050334288228352: success
+#   - Job 2042764965749538816: pending
+#   - Job 2042479597210849280: success
+# [INFO]
+# [INFO] All recent jobs are successful or pending. No analysis needed.
+# [INFO] To analyze a specific failed job, use: --job-id <JOB_ID>
+# [INFO] Find job IDs at: https://prow.ci.openshift.org/?job=periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
+```
+
+**Example 3: Analyze specific job by ID**
+```bash
+./ci/prow/analyze-failure.sh --job-id 2041035894848229376
+
+# Output:
+# [INFO] Using specified job ID: 2041035894848229376
+# [INFO] Downloading job artifacts for 2041035894848229376...
+# [SUCCESS] Downloaded artifacts from job: 2041035894848229376
+# [INFO] Analyzing gap analysis report...
+# [SUCCESS] ✅ Analysis complete!
+```
+
+### Output Files
+
+All files are saved to `ci/artifacts/`:
+
+- **gap-analysis-full_*.json** - Full JSON report from failed job
+- **gap-analysis-full_*.html** - HTML report (if available)
+- **gap-analysis-full_*.md** - Markdown report (if available)
+- **failure-summary.md** - Generated validation failure summary
+
+### Failure Summary Content
+
+The generated `failure-summary.md` includes:
+
+1. **Job metadata** - Job ID, baseline/target versions
+2. **Validation failures by check**:
+   - AWS STS (CHECK #1 & #2) - Missing resources and acknowledgment files
+   - GCP WIF (CHECK #3 & #4) - Missing templates and acknowledgment files
+   - OCP Admin Gates (CHECK #5) - Missing acknowledgment files
+3. **Added/removed items** - Lists changes that caused failures
+4. **Next steps** - Guidance to run `fix-prow-failure.sh` to generate fix files
+
+### Example Failure Summary
+
+```markdown
+# Gap Analysis Failure Summary
+
+**Job ID:** 2041035894848229376
+**Baseline Version:** 4.21.9
+**Target Version:** 4.22.0-ec.4
+
+---
+
+## Validation Failures
+
+### CHECK #1: AWS STS Policy Files (FAILED)
+
+**Missing Directory:**
+- `resources/sts/4.22/`
+
+**Missing Policy Files:**
+- `resources/sts/4.22/openshift-cluster-csi-drivers-ebs-cloud-credentials.json`
+- `resources/sts/4.22/openshift-ingress-operator-cloud-credentials.json`
+- [... 5 more files ...]
+
+**Added AWS Permissions (2):**
+- `ec2:AllocateHosts`
+- `ec2:ReleaseHosts`
+
+### CHECK #2: AWS STS Acknowledgments (FAILED)
+
+**Missing Acknowledgment Files:**
+- `deploy/osd-cluster-acks/sts/4.22/config.yaml`
+- `deploy/osd-cluster-acks/sts/4.22/osd-sts-ack_CloudCredential.yaml`
+
+[... GCP WIF and OCP sections ...]
+
+---
+
+## Next Steps
+
+Run the fix script to generate missing files and create PR:
+
+\`\`\`bash
+./ci/fix-prow-failure.sh --create-pr
+\`\`\`
+
+This will:
+1. Generate all missing policy and acknowledgment files
+2. Create a PR to managed-cluster-config with the fixes
+```
+
+### Library Functions
+
+The analyzer uses library modules organized under `ci/prow/lib/`:
+
+**ci/prow/lib/api.sh** - Prow deck API integration:
+- Uses Prow deck API at `https://prow.ci.openshift.org/prowjobs.js` (publicly accessible, no auth required)
+- `get_job_executions()` - Get recent job executions (default: top 5)
+- `get_job_metadata()` - Fetch job details (status, timestamps)
+- `download_job_directory_gcs()` - Download entire job directory using `gcloud storage cp -r`
+- `find_gap_analysis_reports()` - Find gap-analysis reports in downloaded artifacts directory
+
+**ci/prow/lib/parser.sh** - JSON report parsing:
+- `parse_gap_report()` - Extract baseline, target, validation results
+- `extract_aws_sts_failures()` - Parse AWS STS validation errors
+- `extract_gcp_wif_failures()` - Parse GCP WIF validation errors
+- `extract_ocp_gate_failures()` - Parse OCP gate acknowledgment errors
+- `generate_failure_summary()` - Generate failure summary markdown
+
+**ci/lib/generate-fixes.py** - File content generation (used by `fix-prow-failure.sh`):
+- Reads gap-analysis JSON report
+- Extracts credential requests from OCP release using `oc adm release extract`
+- Generates AWS STS policy files (JSON format matching managed-cluster-config)
+- Generates GCP WIF template (YAML format)
+- Generates acknowledgment files (config.yaml, CloudCredential patches)
+- Validates all generated files
+
 ## Manually Triggering Prow Jobs
 
-The `run-prow-job.sh` script allows you to manually trigger and monitor OpenShift CI Prow jobs via the Gangway API.
+The `prow/trigger-job.sh` script allows you to manually trigger OpenShift CI Prow jobs via the Gangway API and monitor their status.
 
 ### Prerequisites
 
@@ -232,7 +473,7 @@ The `run-prow-job.sh` script allows you to manually trigger and monitor OpenShif
 ### Usage
 
 ```bash
-./run-prow-job.sh [OPTIONS]
+./ci/prow/trigger-job.sh [OPTIONS]
 ```
 
 **Options:**
@@ -244,22 +485,22 @@ The `run-prow-job.sh` script allows you to manually trigger and monitor OpenShif
 
 **Trigger the default nightly job:**
 ```bash
-./run-prow-job.sh
+./ci/prow/trigger-job.sh
 ```
 
 **Trigger and wait for completion:**
 ```bash
-./run-prow-job.sh -w
+./ci/prow/trigger-job.sh -w
 ```
 
 **Trigger a specific job:**
 ```bash
-./run-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
+./ci/prow/trigger-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
 ```
 
 **Trigger a specific job and monitor until completion:**
 ```bash
-./run-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly -w
+./ci/prow/trigger-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly -w
 ```
 
 ### Output
@@ -295,8 +536,68 @@ The script validates:
 - API response codes and error messages
 - Job name existence (returns meaningful error for non-existent jobs)
 
+## Fixing Prow Failures and Creating PRs
+
+Automates generating fix files and creating PRs to managed-cluster-config.
+
+### Quick Start
+
+**Prerequisites:** 
+- `python3`, `PyYAML`, `jq`, `yq`, `gh` CLI, `GH_TOKEN` env var
+- `yq` required for WIF template validation
+
+**Back-to-back workflow (recommended):**
+```bash
+# Analyze and create PR (temp dir auto-cleaned)
+WORK_DIR=$(./ci/analyze-prow-failure.sh --keep-work-dir | tail -1) && \
+  ./ci/fix-prow-failure.sh --work-dir "$WORK_DIR" --create-pr
+```
+
+**Manual review:**
+```bash
+# Step 1: Analyze
+./ci/analyze-prow-failure.sh --work-dir ~/prow-analysis
+
+# Step 2: Review
+cat ~/prow-analysis/failure-summary.md
+
+# Step 3: Fix and create PR
+./ci/fix-prow-failure.sh --work-dir ~/prow-analysis --create-pr
+```
+
+### What It Does
+
+1. **Generates files:** AWS STS policies, GCP WIF templates, acknowledgment files
+2. **Validates files:**
+   - JSON/YAML syntax validation
+   - WIF template validation (service account ID ≤25 chars, role ID ≤50 chars, format checks)
+3. **Creates PR** with branch `ocp-X.XX-gap-analysis-update` and description including:
+   - Prow job URL: `[View Job Details](https://prow.ci.openshift.org/view/gs/test-platform-results/logs/{job_name}/{job_id})`
+   - HTML report URL: `[View Full Report](https://gcsweb-ci.../{exact_filename}.html)`
+   - Per-file permission changes: `**filename:** Added: ec2:AllocateHosts, ec2:ReleaseHosts`
+   - Conditional OCP ack files (only if admin gates exist)
+   - File counts and footer: "Generated by [ROSA Gap Analysis](https://github.com/openshift-online/rosa-gap-analysis)"
+
+### Configuration
+
+Set `GH_TOKEN` environment variable or create `.github-pr-config`:
+```bash
+export GH_TOKEN="ghp_yourToken"
+TARGET_REPO="openshift/managed-cluster-config"
+FORK_REPO="bot-user/managed-cluster-config"
+```
+
+See `ci/TESTING.md` for detailed testing guide.
+
 ## Related Documentation
 
 - [Gap Analysis Scripts](../scripts/) - Scripts that run inside this container
+- [CI Testing Guide](TESTING.md) - End-to-end testing workflow
+- [Main README](../README.md) - Overall project documentation
+
+## Related Documentation
+
+- [Gap Analysis Scripts](../scripts/) - Scripts that run inside this container
+- [CI Testing Guide](TESTING.md) - End-to-end testing workflow
 - [Main README](../README.md) - Overall project documentation
 - [ci-operator docs](https://docs.ci.openshift.org/docs/architecture/ci-operator/) - OpenShift CI system

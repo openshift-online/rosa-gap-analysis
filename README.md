@@ -152,6 +152,35 @@ python3 ./scripts/gap-feature-gates.py --baseline 4.21 --target 4.22
 [SUCCESS] Combined report generated: ./reports/gap-analysis-full_*.md
 ```
 
+### Analyze CI Failures
+
+When a Prow job fails, automatically analyze it and generate PR requirements:
+
+```bash
+# Analyze latest failed periodic job
+./ci/prow/analyze-failure.sh
+
+# Output
+[INFO] Gap Analysis Failure Analyzer
+[INFO] Finding latest failed job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
+[SUCCESS] Found failed job: 2041035894848229376
+[INFO] Downloading artifacts for job 2041035894848229376...
+[SUCCESS] Downloaded: ci/artifacts/gap-analysis-full_4.21.9_to_4.22.0-ec.4_*.json
+[INFO] Analyzing gap analysis report...
+[SUCCESS] PR summary generated: ci/artifacts/pr-summary.md
+
+# View PR summary
+cat ci/artifacts/pr-summary.md
+```
+
+The analyzer automatically:
+- Finds the latest **FAILED** Prow job
+- Downloads gap-analysis artifacts locally to `ci/artifacts/`
+- Parses validation failures from CHECK #1-5
+- Extracts credentials from target OCP release (reuses gap-aws-sts.py/gap-gcp-wif.py functions)
+- Generates exact file content for all missing files
+- Creates `pr-summary.md` with copy-paste ready content for managed-cluster-config PR
+
 ## Use Cases
 
 ### Pre-Upgrade Assessment

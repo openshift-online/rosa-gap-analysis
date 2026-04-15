@@ -5,6 +5,8 @@ import os
 import shutil
 import sys
 from pathlib import Path
+from urllib.request import urlopen, Request
+from urllib.error import HTTPError, URLError
 
 
 # ANSI color codes
@@ -48,3 +50,32 @@ def get_project_root():
     """Get the project root directory."""
     # Script is in scripts/lib, so project root is two levels up
     return Path(__file__).parent.parent.parent.resolve()
+
+
+def fetch_url(url, timeout=30):
+    """
+    Fetch content from URL with error handling.
+
+    Args:
+        url: URL to fetch
+        timeout: Request timeout in seconds (default: 30)
+
+    Returns:
+        Response data as bytes
+
+    Raises:
+        HTTPError: If HTTP request fails
+        URLError: If connection fails
+    """
+    req = Request(url, headers={'User-Agent': 'gap-analysis-script'})
+    with urlopen(req, timeout=timeout) as response:
+        return response.read()
+
+
+def check_yaml_installed():
+    """Check if PyYAML is installed and exit if not."""
+    try:
+        import yaml
+    except ImportError:
+        log_error("PyYAML is not installed. Install it with: pip install pyyaml")
+        sys.exit(1)

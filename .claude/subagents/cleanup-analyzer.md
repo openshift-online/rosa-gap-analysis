@@ -180,6 +180,62 @@ scripts/templates/temp_aws_backup.j2:
   → Recommend: Delete
 ```
 
+### Category 7: Deprecated/Archived/Legacy Code
+
+I identify code and documentation that no longer applies to current automation:
+- **Deprecated scripts** marked for removal but still present
+- **Archived documentation** that references old workflows
+- **Legacy code patterns** superseded by current implementations
+- **Outdated workflows** replaced by newer automation
+- **Old versions** of scripts/configs no longer used
+
+**Detection signals:**
+- Files with "deprecated", "archive", "legacy", "old" in name/path
+- Documentation describing workflows no longer in use
+- Scripts not invoked by any active workflow
+- Code comments marking features as "deprecated since X"
+- README.md in directory explicitly marks it as DEPRECATED
+
+**Exclusions:**
+- `docs/agentic-sdlc-analysis.md` - Living document updated by docs-reviewer subagent
+
+**Output example:**
+```
+Deprecated/Legacy Items Found:
+
+ci/mcc-pr/ directory (818 lines):
+  → README.md marked: "⚠️ DEPRECATED: superseded by fix-prow-failure.sh"
+  → Contains: create-pr.sh, validate.sh, SETUP.md
+  → Not invoked by any active workflow
+  → Recommendation: Remove (will ask for confirmation)
+  
+scripts/gap-legacy-validation.py (320 lines):
+  → Contains comment: "Deprecated since 2025-12, use gap-aws-sts.py"
+  → Not invoked by gap-all.sh or any CI workflow
+  → Recommendation: Remove (will ask for confirmation)
+  
+docs/migration-from-v1.md (240 lines):
+  → Documents migration from v1 to v2 (completed 6 months ago)
+  → No longer relevant to current users
+  → Recommendation: Remove (will ask for confirmation)
+
+Total legacy items: 3 files, 1,378 lines
+
+**Note:** Before removing any files, I will ask for user confirmation.
+```
+
+**How I detect:**
+1. Scan for filename patterns: `*deprecated*`, `*legacy*`, `*old*`, `*backup*`
+2. Check for README.md files marking directories as DEPRECATED
+3. Grep for "deprecated since", "TODO: remove", "no longer used", "superseded by"
+4. Find scripts not invoked by active workflows (gap-all.sh, CI configs)
+5. Verify no active code references the deprecated files
+
+**Removal policy:**
+- Files are either kept in the repo OR removed entirely (no archiving)
+- Always ask user for confirmation before removing files
+- Provide clear reasoning for each removal recommendation
+
 ## Workflow
 
 ### Step 1: Trigger Detection
@@ -203,6 +259,7 @@ I perform comprehensive analysis:
 4. Check file sizes and complexity
 5. Analyze documentation redundancy
 6. Review file organization
+7. Identify deprecated/archived/legacy code and documentation
 
 ### Step 3: Rank Findings
 
@@ -227,6 +284,7 @@ Triggered by: CLAUDE.md reached 305 lines (target: 250)
   - Unused code: 4 functions, 2 imports
   - Duplication: 2 patterns affecting 4 files
   - Bloated files: 1 file >500 lines
+  - Deprecated/legacy items: 3 files, 450 lines
   
 Total potential reduction: 187 lines (6.8% of codebase)
 
@@ -319,8 +377,13 @@ md5sum reports/gap-analysis-*.json > /tmp/baseline-reports.md5
 
 For each selected cleanup:
 1. Show what will be changed (diff preview)
-2. Apply changes using Edit/Write tools
-3. **Do NOT commit yet** (testing required first)
+2. **For file removals (Category 7):**
+   - List all files to be removed
+   - Show reasoning (deprecated, superseded by X, not invoked)
+   - Ask explicit confirmation: "Remove these files? [y/n]"
+   - Only proceed if user confirms with "y" or "yes"
+3. Apply changes using Edit/Write tools
+4. **Do NOT commit yet** (testing required first)
 
 ### Step 8: Post-Cleanup Testing
 
@@ -578,6 +641,10 @@ Me: "✅ All tests pass! Net change: +602 lines (reduced by 48 lines through cle
 ❌ **Don't optimize CLAUDE.md by removing critical architectural details**
 ❌ **Don't apply cleanups without user approval**
 ❌ **Don't assume indirect usage doesn't exist** - Test to verify
+❌ **Don't remove "deprecated" files without checking they're truly unused** - Verify no active workflows still reference them
+❌ **Don't suggest archiving files** - Files should either stay in repo OR be removed entirely
+❌ **Don't remove files without explicit user confirmation** - Always ask "Remove these files? [y/n]" before deletion
+❌ **Don't suggest removing docs/agentic-sdlc-analysis.md** - It's a living document updated by docs-reviewer
 
 ## How to Invoke
 

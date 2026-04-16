@@ -177,12 +177,13 @@ with open('gap-analysis-feature-gates_4.20_to_4.21_20260325_153237.json') as f:
 
 ## Report Location
 
-Reports are generated in the **current working directory** where the script is executed.
+Reports are generated in `./reports/` by default.
 
 To specify a different location:
 ```bash
-cd /path/to/reports
-python3 /path/to/scripts/gap-aws-sts.py --baseline 4.20 --target 4.21
+python3 /path/to/scripts/gap-aws-sts.py --baseline 4.20 --target 4.21 --report-dir /path/to/reports
+# Or via environment variable:
+REPORT_DIR=/path/to/reports ./scripts/gap-all.sh --baseline 4.20 --target 4.21
 ```
 
 ## CI/CD Integration
@@ -222,13 +223,13 @@ fi
 
 ## Report Customization
 
-The report generation is handled by `scripts/lib/reporters.py`. To customize:
+The report generation is handled by `scripts/lib/reporters.py` using Jinja2 templates in `scripts/templates/`. To customize:
 
-1. Edit report templates in `reporters.py`
-2. Modify CSS styles in HTML report generator
-3. Add new report formats (PDF, Excel, etc.)
+1. Edit HTML templates in `scripts/templates/*.html.j2`
+2. Modify CSS styles within the HTML templates
+3. Add new report formats (PDF, Excel, etc.) by extending `reporters.py`
 
-See `scripts/lib/reporters.py` for implementation details.
+See `scripts/lib/reporters.py` and `scripts/templates/` for implementation details.
 
 ## Troubleshooting
 

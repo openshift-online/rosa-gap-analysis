@@ -115,10 +115,10 @@ done
 
 ### Exit Codes
 
-- **0** - Successful execution (regardless of differences)
-- **1** - Execution failure (missing tools, network errors)
+- **0** - Successful execution with all validation checks passing
+- **1** - Execution error (missing tools, network errors) OR validation checks 1-5 failed
 
-**Important:** Scripts do NOT fail when differences are detected.
+**Note:** `gap-feature-gates.py` (check 6) is informational only and always exits 0 on success.
 
 ### Console Output
 
@@ -134,5 +134,4 @@ done
 ## Next Steps
 
 - [Configuration](configuration.md) - Detailed configuration options
-- [CI/CD Integration](ci-integration.md) - Automate in pipelines
 - [Development](development.md) - Contributing and testing

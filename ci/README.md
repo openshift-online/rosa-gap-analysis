@@ -113,7 +113,7 @@ tests:
   commands: |
     # Feature gates analysis with Sippy API
     python3 ./scripts/gap-feature-gates.py --baseline 4.21 --target 4.22
-    cat reports/gap-analysis-feature-gates_*.md
+    ls -lh reports/gap-analysis-feature-gates_*.{html,json}
   container:
     from: src
 
@@ -193,8 +193,8 @@ The container image has the following structure:
 │   └── lib/                        # Shared libraries
 │       ├── common.py               # Python utilities (logging, etc.)
 │       ├── openshift_releases.py   # Version resolution (Python)
-│       ├── reporters.py            # Report generation (MD, HTML, JSON)
-│       ├── common.sh               # Bash utilities
+│       ├── reporters.py            # Report generation (HTML, JSON)
+│       ├── logging.sh              # Bash logging utilities
 │       └── openshift-releases.sh   # Version resolution (Bash)
 ├── reports/                         # Default report directory (created at runtime)
 │   ├── gap-analysis-aws-sts_*.html
@@ -222,7 +222,7 @@ The container image has the following structure:
 
 **1. Trigger Prow Jobs** (Manual job triggering):
 ```bash
-./ci/trigger-prow-job.sh --wait  # Trigger and monitor job
+./ci/trigger-prow-job.sh -w  # Trigger and monitor job
 ```
 See: [Manually Triggering Prow Jobs](#manually-triggering-prow-jobs)
 
@@ -301,7 +301,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 ### Usage
 
 ```bash
-./ci/prow/analyze-failure.sh [OPTIONS]
+./ci/analyze-prow-failure.sh [OPTIONS]
 ```
 
 **Options:**
@@ -329,7 +329,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 
 **Example 1: Analyze most recent job**
 ```bash
-./ci/prow/analyze-failure.sh
+./ci/analyze-prow-failure.sh
 
 # Output when failures found:
 # [INFO] Gap Analysis Failure Analyzer
@@ -371,7 +371,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 
 **Example 2: Most recent job successful (graceful exit)**
 ```bash
-./ci/prow/analyze-failure.sh
+./ci/analyze-prow-failure.sh
 
 # Output:
 # [INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly...
@@ -388,7 +388,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 
 **Example 3: Analyze specific job by ID**
 ```bash
-./ci/prow/analyze-failure.sh --job-id 2041035894848229376
+./ci/analyze-prow-failure.sh --job-id 2041035894848229376
 
 # Output:
 # [INFO] Using specified job ID: 2041035894848229376
@@ -470,16 +470,16 @@ This will:
 
 ### Library Functions
 
-The analyzer uses library modules organized under `ci/prow/lib/`:
+The analyzer uses library modules organized under `ci/lib/`:
 
-**ci/prow/lib/api.sh** - Prow deck API integration:
+**ci/lib/prow-api.sh** - Prow deck API integration:
 - Uses Prow deck API at `https://prow.ci.openshift.org/prowjobs.js` (publicly accessible, no auth required)
 - `get_job_executions()` - Get recent job executions (count parameter, default: 1)
 - `get_job_metadata()` - Fetch job details (status, timestamps)
 - `download_job_directory_gcs()` - Download entire job directory using `gcloud storage cp -r`
 - `find_gap_analysis_reports()` - Find gap-analysis reports in downloaded artifacts directory
 
-**ci/prow/lib/parser.sh** - JSON report parsing:
+**ci/lib/failure-parser.sh** - JSON report parsing:
 - `parse_gap_report()` - Extract baseline, target, validation results
 - `extract_aws_sts_failures()` - Parse AWS STS validation errors
 - `extract_gcp_wif_failures()` - Parse GCP WIF validation errors
@@ -496,7 +496,7 @@ The analyzer uses library modules organized under `ci/prow/lib/`:
 
 ## Manually Triggering Prow Jobs
 
-The `prow/trigger-job.sh` script allows you to manually trigger OpenShift CI Prow jobs via the Gangway API and monitor their status.
+The `trigger-prow-job.sh` script allows you to manually trigger OpenShift CI Prow jobs via the Gangway API and monitor their status.
 
 ### Prerequisites
 
@@ -509,7 +509,7 @@ The `prow/trigger-job.sh` script allows you to manually trigger OpenShift CI Pro
 ### Usage
 
 ```bash
-./ci/prow/trigger-job.sh [OPTIONS]
+./ci/trigger-prow-job.sh [OPTIONS]
 ```
 
 **Options:**
@@ -521,22 +521,22 @@ The `prow/trigger-job.sh` script allows you to manually trigger OpenShift CI Pro
 
 **Trigger the default nightly job:**
 ```bash
-./ci/prow/trigger-job.sh
+./ci/trigger-prow-job.sh
 ```
 
 **Trigger and wait for completion:**
 ```bash
-./ci/prow/trigger-job.sh -w
+./ci/trigger-prow-job.sh -w
 ```
 
 **Trigger a specific job:**
 ```bash
-./ci/prow/trigger-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
+./ci/trigger-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
 ```
 
 **Trigger a specific job and monitor until completion:**
 ```bash
-./ci/prow/trigger-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly -w
+./ci/trigger-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly -w
 ```
 
 ### Output

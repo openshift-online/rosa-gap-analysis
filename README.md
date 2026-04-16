@@ -44,7 +44,7 @@ pip install pyyaml
 curl -L https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz | tar xz
 ```
 
-See [Installation Guide](docs/installation.md) for detailed setup instructions.
+See [Installation Guide](docs/getting-started.md) for detailed setup instructions.
 
 ### Run Gap Analysis
 
@@ -80,7 +80,6 @@ jq '.aws_sts.comparison' reports/gap-analysis-full_*.json
 - [✅ Validation Checks](docs/validation-checks.md) - Details about all 6 validation checks
 - [🚀 Getting Started](docs/getting-started.md) - Installation and basic usage
 - [⚙️ Configuration](docs/configuration.md) - CLI arguments, environment variables, version resolution
-- [🔄 CI/CD Integration](docs/ci-integration.md) - Pipeline integration patterns
 - [🔧 Development](docs/development.md) - Contributing and customization
 
 **Additional Resources:**
@@ -155,7 +154,7 @@ When a Prow job fails, automatically analyze it and generate PR requirements:
 
 ```bash
 # Analyze latest failed periodic job
-./ci/prow/analyze-failure.sh
+./ci/analyze-prow-failure.sh
 
 # Output
 [INFO] Gap Analysis Failure Analyzer
@@ -196,22 +195,23 @@ Automatically detect policy changes in continuous integration workflows.
 
 Scripts are designed for CI/CD integration:
 
-- **Exit 0**: Successful execution (regardless of differences found)
-- **Exit 1**: Execution failure (missing tools, network errors)
-
-**Important**: Scripts do NOT fail when differences are detected. This prevents false CI failures when policies legitimately change between versions.
+| Script | Exit 0 | Exit 1 |
+|--------|--------|--------|
+| `gap-aws-sts.py` | Successful execution | Execution error OR validation FAIL (checks 1-2) |
+| `gap-gcp-wif.py` | Successful execution | Execution error OR validation FAIL (checks 3-4) |
+| `gap-ocp-gate-ack.py` | Successful execution | Execution error OR validation FAIL (check 5) |
+| `gap-feature-gates.py` | Always on success | Execution error only (check 6 is informational) |
+| `gap-all.sh` | All checks 1-5 pass | Any check 1-5 fails |
 
 ```bash
-# Detect differences by parsing output
-if ./scripts/gap-all.sh 2>&1 | grep -q "differences detected"; then
-  echo "Policy changes detected - review reports/"
-fi
+# Run full analysis; exits 1 if any validation checks fail
+./scripts/gap-all.sh --baseline 4.21 --target 4.22
 
-# Or use JSON reports
+# Parse JSON reports for programmatic analysis
 jq -e '.comparison.actions.target_only | length > 0' reports/gap-analysis-aws-sts_*.json
 ```
 
-See [CI/CD Integration](docs/ci-integration.md) for detailed examples.
+See [Getting Started](docs/getting-started.md) for detailed examples.
 
 ## Claude Code Integration
 
@@ -234,7 +234,7 @@ Gap analysis scripts use the same underlying approach as `osdctl iampermissions 
 osdctl iampermissions diff -c aws -b 4.21 -t 4.22
 
 # Gap analysis adds:
-# - Automatic report generation (MD, HTML, JSON)
+# - Automatic report generation (HTML, JSON)
 # - Feature gate analysis
 # - Combined cross-platform analysis
 # - CI/CD-friendly exit codes

@@ -4,7 +4,7 @@ description: >
   Analyze AWS STS (Security Token Service) IAM policy gaps between OpenShift versions.
   Use when comparing AWS STS policies across OpenShift versions.
   Identifies new permissions, removed permissions, and changed permission scopes.
-  Logs detected policy differences but always exits 0 on successful execution.
+  Exits 0 when validation passes, exits 1 when validation fails or on execution error.
   Automatically generates comprehensive reports in HTML and JSON formats.
 compatibility:
   required_tools:
@@ -32,7 +32,7 @@ Trigger this skill when:
 1. **Extracts credential requests** from OpenShift release payloads using `oc adm release extract`
 2. **Converts CredentialsRequest manifests** to consolidated IAM policy JSON documents
 3. **Compares IAM permissions** at action-level and service-level to identify changes
-4. **Logs policy differences** and always exits 0 on successful execution (only exits 1 on execution failures)
+4. **Validates policy files** against OCP release credential requests; exits 1 if validation fails (CHECK #1 or #2) or on execution failures
 
 ## Workflow
 
@@ -97,11 +97,11 @@ Note: Platform is always 'aws' for this script.
 2. Extracts credential requests from both versions using `oc adm release extract --credentials-requests --cloud=aws`
 3. Parses YAML CredentialsRequest manifests and converts to IAM policy JSON
 4. Compares policies at action-level and service-level
-5. Logs detected differences and always exits 0 on successful execution
+5. Validates policy files against OCP release; exits 1 if validation fails, exits 0 if validation passes
 
 **Exit Codes:**
-- `0`: Successful execution (regardless of whether differences were found)
-- `1`: Execution failure (e.g., missing tools, network errors, invalid versions)
+- `0`: Validation PASSED (CHECK #1 and CHECK #2 both valid)
+- `1`: Validation FAILED (CHECK #1 or CHECK #2 failed) OR execution failure (e.g., missing tools, network errors, invalid versions)
 
 **This uses the same approach as osdctl** for data extraction.
 
@@ -141,22 +141,15 @@ The script converts CredentialsRequest YAML manifests to IAM policy JSON:
 
 ### Step 5: Interpret Results
 
-The script always exits with code 0 on successful execution and logs:
-- Number of added permissions (if any)
-- Number of removed permissions (if any)
-- Summary message indicating result
+The script exits based on validation result:
+- **Exit 0**: Validation PASSED (all policy files are present and match OCP release)
+- **Exit 1**: Validation FAILED (CHECK #1 or CHECK #2 failed) or execution error (missing tools, network errors, invalid versions)
 
-The script only exits with code 1 on execution failures:
-- Missing required tools (jq, oc CLI)
-- Network errors fetching release images
-- Invalid version strings
-- Other execution errors
-
-**For detailed analysis**, you can examine the temporary comparison files before they're cleaned up by adding custom logic, or re-run the analysis with the `compare_sts_policies` function from `scripts/lib/common.sh`.
+**For detailed analysis**, examine the generated JSON reports in the reports directory, or re-run the analysis with `--verbose` for detailed per-file output.
 
 ## Output Format
 
-The script outputs log messages to stderr and always exits 0 on successful execution:
+The script outputs log messages to stderr and exits based on validation result:
 
 ```
 [INFO] Starting AWS STS Policy Gap Analysis
@@ -174,7 +167,7 @@ The script outputs log messages to stderr and always exits 0 on successful execu
 [INFO] Policy differences detected: 3 added, 1 removed
 ```
 
-Exit code: `0` (successful execution, differences found)
+Exit code: `0` (validation PASSED) or `1` (validation FAILED - CHECK #1 or #2)
 
 Or:
 
@@ -182,7 +175,7 @@ Or:
 [SUCCESS] No policy differences found between 4.21 and 4.22
 ```
 
-Exit code: `0` (successful execution, no differences)
+Exit code: `0` (validation PASSED, no differences)
 
 ## Important Considerations
 
@@ -228,9 +221,9 @@ firefox reports/gap-analysis-aws-sts_*.html
 - Suggest pre-upgrade validation steps
 
 **CI/CD Integration:**
-- Parse script output to detect policy changes (exit codes only indicate execution success/failure)
-- Script always exits 0 on successful execution regardless of differences
-- Automate notifications when policies differ by parsing log messages
+- Use exit codes directly: exit 1 means validation failed (CHECK #1 or CHECK #2)
+- Script exits 0 only when all validation checks pass
+- Parse JSON reports for detailed per-check results
 
 ## osdctl Integration
 
@@ -240,9 +233,9 @@ This skill uses the **same underlying approach as osdctl** for data extraction:
 # osdctl command (simple file diff)
 osdctl iampermissions diff -c aws -b 4.21.0 -t 4.22.0
 
-# Our exit-code based check (for CI/CD)
-./scripts/gap-aws-sts.sh --baseline 4.21.0 --target 4.22.0
-echo $?  # 0 = no changes, 1 = changes detected
+# Our validation-based check (for CI/CD)
+python3 ./scripts/gap-aws-sts.py --baseline 4.21.0 --target 4.22.0
+echo $?  # 0 = validation PASSED, 1 = validation FAILED or execution error
 ```
 
 **What's the same:**
@@ -308,7 +301,7 @@ TARGET_VERSION=NIGHTLY python3 ./scripts/gap-aws-sts.py
 [INFO] Comparing STS policies...
 [INFO] Policy differences detected: 3 added, 1 removed
 ```
-Exit code: `0` (successful execution)
+Exit code: `0` (validation PASSED) or `1` (validation FAILED)
 
 **Sample Output (no differences):**
 ```
@@ -317,18 +310,15 @@ Exit code: `0` (successful execution)
 [INFO] Target version: 4.22
 [SUCCESS] No policy differences found between 4.21 and 4.22
 ```
-Exit code: `0` (successful execution)
+Exit code: `0` (validation PASSED)
 
 **Use in CI/CD:**
 ```bash
-# Script always exits 0 on success
-python3 ./scripts/gap-aws-sts.py --baseline 4.21 --target 4.22
-
-# Check for differences by parsing output
-if python3 ./scripts/gap-aws-sts.py --baseline 4.21 --target 4.22 2>&1 | grep -q "Policy differences detected"; then
-  echo "Policy changes detected - review reports/"
+# Exit code reflects validation result: 0=PASSED, 1=FAILED
+if python3 ./scripts/gap-aws-sts.py --baseline 4.21 --target 4.22; then
+  echo "Validation passed - safe to proceed"
 else
-  echo "No policy changes - safe to proceed"
+  echo "Validation failed - policy files missing or outdated"
 fi
 
 # Use JSON report for programmatic analysis

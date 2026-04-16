@@ -204,7 +204,7 @@ from reporters import generate_html_report, generate_json_report
 - `openshift_releases.py` - Version resolution, Sippy queries, minor version extraction
 - `reporters.py` - Multi-format report generation
 - `ack_validation.py` - managed-cluster-config validation logic
-- `common.sh`, `openshift-releases.sh` - Bash equivalents
+- `logging.sh`, `openshift-releases.sh` - Bash equivalents
 
 ## Runtime Dependencies
 
@@ -221,4 +221,4 @@ from reporters import generate_html_report, generate_json_report
 **PR creation (fix-prow-failure.sh):**
 - `yq` (WIF template validation) - https://github.com/mikefarah/yq
 
-No requirements.txt - dependencies installed manually or in Containerfile.
+Python packages (`PyYAML`, `Jinja2`) listed in `requirements.txt`; install with `pip install -r requirements.txt`. Container dependencies managed via `ci/Containerfile`.

@@ -27,7 +27,7 @@ Identifies changes between OpenShift versions through 6 validation checks:
    ↓
 2. Extract credential requests / feature gates
    ↓
-3. Compare and generate reports (MD, HTML, JSON)
+3. Compare and generate reports (HTML, JSON)
    ↓
 4. Review changes and assess impact
 ```
@@ -35,7 +35,7 @@ Identifies changes between OpenShift versions through 6 validation checks:
 ## Key Features
 
 - **Automated extraction** - Uses `oc adm release extract` and Sippy API
-- **Multi-format reports** - Markdown, HTML, and JSON
+- **Multi-format reports** - HTML and JSON
 - **Auto-detection** - Automatically finds latest versions
 - **CI/CD ready** - Exit codes designed for pipelines
 - **Template-based** - Jinja2 templates for easy customization
@@ -112,7 +112,6 @@ fi
 ## Reports
 
 **Formats:**
-- Markdown - Terminal viewing, version control
 - HTML - Browser viewing, presentations
 - JSON - Programmatic analysis, CI/CD
 
@@ -129,5 +128,4 @@ gap-analysis-<type>_<baseline>_to_<target>_<timestamp>.<ext>
 
 - [Getting Started](getting-started.md) - Installation and basic usage
 - [Configuration](configuration.md) - CLI args, env vars, version resolution
-- [CI/CD Integration](ci-integration.md) - Pipeline integration
 - [Development](development.md) - Contributing and customization

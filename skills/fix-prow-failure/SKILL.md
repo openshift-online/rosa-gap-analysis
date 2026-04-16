@@ -70,8 +70,15 @@ cat ~/prow-analysis/failure-summary.md
 2. Generates AWS STS policies (7 files)
 3. Generates GCP WIF template (1 file)
 4. Generates acknowledgment files (4-5 files)
-5. Validates all files
-6. (If --create-pr) Creates PR with template
+5. Validates all files (JSON/YAML syntax, WIF template format)
+6. (If --create-pr) Creates PR:
+   a. Clones fork and creates branch
+   b. Copies gap-analysis generated files
+   c. **Runs `make`** to generate ACM policies and hack templates
+   d. Stages ALL files (gap-analysis + make-generated)
+   e. Creates commit
+   f. **Verifies `make` is idempotent** (re-runs make to ensure no changes)
+   g. Pushes to fork and creates PR
 7. (If temp dir) Cleans up after successful PR
 
 ## Output
@@ -88,6 +95,18 @@ cat ~/prow-analysis/failure-summary.md
 [SUCCESS] ✅ Validation passed!
 
 [INFO] Creating pull request...
+[INFO] Copying generated files...
+[SUCCESS] ✓ Files copied
+[INFO] Running 'make' to generate additional files...
+[SUCCESS] ✓ Make completed successfully
+[INFO] Make generated/modified 15 additional file(s)
+[INFO] Staging all changed files (gap-analysis + make-generated)...
+[SUCCESS] ✓ All files staged
+[SUCCESS] ✓ Working tree is clean (all changes staged)
+[INFO] Creating commit...
+[SUCCESS] ✓ Commit created
+[INFO] Verifying 'make' is idempotent (prevents CI check failures)...
+[SUCCESS] ✓ Make is idempotent (no changes on re-run)
 [SUCCESS] ✅ PR created: https://github.com/openshift/managed-cluster-config/pull/1234
 [INFO] Cleaning up temporary work directory
 [SUCCESS] ✓ Complete!
@@ -110,9 +129,15 @@ cat ~/prow-analysis/failure-summary.md
 - Shows note if no gates: "No OCP admin gates found for version X.XX"
 
 **File handling:**
-- Commits ALL files: 12 gap-analysis + make-generated files (~17 total after make)
+- Commits ALL files: 12 gap-analysis + make-generated files (~25-30 total after make)
 - PR description lists ONLY gap-analysis files (AWS STS: 7, GCP WIF: 1, Acks: 4)
 - Make-generated files (ACM policies, hack templates) are committed but not highlighted in PR body
+
+**Make verification (idempotency check):**
+- After commit, script re-runs `make` to ensure it's deterministic
+- If `make` produces changes on second run, PR creation fails
+- This prevents CI check failures where managed-cluster-config pr-check runs `make` and expects no changes
+- Ensures the PR is in the same state as what CI will verify
 
 **PR replacement:**
 - If a PR already exists for the same branch (`ocp-X.XX-gap-analysis-update`), it will be automatically closed

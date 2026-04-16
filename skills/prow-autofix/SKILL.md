@@ -38,8 +38,10 @@ The `ci/prow-autofix.sh` script provides complete end-to-end automation:
 2. **Parse** - Extract validation failures (CHECK #1-5) from gap-analysis reports
 3. **Generate** - Create AWS STS policies, GCP WIF templates, acknowledgment files
 4. **Validate** - JSON/YAML syntax, WIF template validation (service account/role ID constraints)
-5. **Create PR** - Template-based description with job URLs, HTML report links, permission changes (closes existing PR if present)
-6. **Cleanup** - Automatic temporary directory cleanup after success
+5. **Run `make`** - Execute `make` in managed-cluster-config to generate ACM policies and hack templates (PR created only if make succeeds)
+6. **Verify idempotency** - Re-run `make` after commit to ensure deterministic behavior (prevents CI check failures)
+7. **Create PR** - Template-based description with job URLs, HTML report links, permission changes (closes existing PR if present)
+8. **Cleanup** - Automatic temporary directory cleanup after success
 
 ## Workflow
 

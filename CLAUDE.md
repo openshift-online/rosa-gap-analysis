@@ -185,14 +185,16 @@ from reporters import generate_html_report, generate_json_report
 - **GCP WIF**: Copies from `resources/wif/{baseline}/` → `resources/wif/{target}/`, updates version strings (v4.21 → v4.22)
 
 **Manual PR creator (ci/fix-prow-failure.sh):**
-- Generates files → validates (JSON, YAML, WIF via `validate-wif-template.sh`) → creates PR
+- Generates files → validates (JSON, YAML, WIF via `validate-wif-template.sh`) → **runs `make`** → creates PR
+- **Make step (REQUIRED)**: Runs `make` in managed-cluster-config to generate ACM policies and hack templates; PR created ONLY if make succeeds
+- **Make verification**: After commit, re-runs `make` to verify idempotency (no changes on re-run); prevents CI check failures
 - WIF validation: service account ID (max 25 chars), role ID (max 50 chars), format checks; requires `yq`
 - Work directory: requires `--work-dir`; auto-cleanup for temp dirs, preserves user-specified paths
 - PR template (`ci/templates/pr-body.md`): URLs (Prow job, HTML report), versions, failure summary, file counts, permission changes per-file
 - AWS permissions: shows per-file added/removed actions in PR description
 - Conditional OCP acks: skips config.yaml if no gates found
 - File staging: commits ALL files (gap-analysis + make-generated), PR description lists only gap-analysis files
-- Workflow: clone fork → create branch `ocp-X.XX-gap-analysis-update` → generate → make → commit → PR
+- Workflow: clone fork → create branch → copy gap-analysis files → **`make`** → stage all → verify clean → commit → **verify `make` idempotent** → push → PR
 - PR replacement: closes existing PR for same branch and creates new one with updated changes
 
 ## Development

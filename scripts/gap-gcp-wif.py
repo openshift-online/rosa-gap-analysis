@@ -31,8 +31,8 @@ def validate_wif_acknowledgment(baseline, target, added_actions=None):
     """
     Comprehensive validation of WIF acknowledgment in managed-cluster-config.
 
-    CHECK #1: Resources validation (resources/wif/{version}/)
-    CHECK #2: Admin acknowledgment validation (deploy/osd-cluster-acks/wif/{version}/)
+    CHECK #3: Resources validation (resources/wif/{version}/)
+    CHECK #4: Admin acknowledgment validation (deploy/osd-cluster-acks/wif/{version}/)
 
     Args:
         baseline: Baseline version (e.g., "4.20.5")

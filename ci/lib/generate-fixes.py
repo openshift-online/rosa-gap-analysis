@@ -48,6 +48,114 @@ from common import log_info, log_success, log_error, log_warning
 from openshift_releases import extract_minor_version
 
 
+def fetch_github_directory_files(repo, path, file_extension=None):
+    """
+    Fetch all files from a GitHub directory.
+
+    Args:
+        repo: Repository in format 'owner/repo'
+        path: Directory path (e.g., 'resources/sts/4.21')
+        file_extension: Optional filter by extension (e.g., '.json', '.yaml')
+
+    Returns: dict mapping filename -> file content (parsed JSON/YAML or raw text)
+    """
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+
+    log_info(f"Fetching files from {repo}/{path}...")
+
+    try:
+        with urlopen(url) as response:
+            files_list = json.loads(response.read().decode('utf-8'))
+
+        if not isinstance(files_list, list):
+            log_error(f"Expected list of files, got: {type(files_list)}")
+            return {}
+
+        files = {}
+        for file_info in files_list:
+            if file_info.get('type') != 'file':
+                continue
+
+            filename = file_info.get('name', '')
+
+            # Filter by extension if specified
+            if file_extension and not filename.endswith(file_extension):
+                continue
+
+            download_url = file_info.get('download_url')
+            if not download_url:
+                continue
+
+            # Download file content
+            try:
+                with urlopen(download_url) as file_response:
+                    content = file_response.read().decode('utf-8')
+
+                # Parse based on file extension
+                if filename.endswith('.json'):
+                    files[filename] = json.loads(content)
+                elif filename.endswith('.yaml') or filename.endswith('.yml'):
+                    files[filename] = yaml.safe_load(content)
+                else:
+                    files[filename] = content
+
+                log_info(f"  ✓ Fetched: {filename}")
+            except Exception as e:
+                log_warning(f"  ✗ Failed to fetch {filename}: {e}")
+
+        log_success(f"Fetched {len(files)} file(s) from {path}")
+        return files
+
+    except Exception as e:
+        log_error(f"Failed to fetch directory contents from {url}: {e}")
+        return {}
+
+
+def copy_previous_sts_files(baseline_version):
+    """
+    Copy ALL STS policy files from previous version.
+
+    This ensures we preserve infrastructure files (installer policies, SCP policies, etc.)
+    that don't come from CredentialRequests.
+
+    Returns: dict mapping filename -> policy content
+    """
+    baseline_minor = extract_minor_version(baseline_version)
+    path = f"resources/sts/{baseline_minor}"
+
+    log_info(f"Copying ALL STS files from baseline version {baseline_minor}...")
+
+    files = fetch_github_directory_files('openshift/managed-cluster-config', path, '.json')
+
+    if not files:
+        log_warning(f"No STS files found for baseline {baseline_minor}")
+        return {}
+
+    log_success(f"Copied {len(files)} STS policy files from {baseline_minor}")
+    return files
+
+
+def copy_previous_wif_files(baseline_version):
+    """
+    Copy ALL WIF template files from previous version.
+
+    Returns: dict mapping filename -> template content
+    """
+    baseline_minor = extract_minor_version(baseline_version)
+    path = f"resources/wif/{baseline_minor}"
+
+    log_info(f"Copying ALL WIF files from baseline version {baseline_minor}...")
+
+    files = fetch_github_directory_files('openshift/managed-cluster-config', path, '.yaml')
+
+    if not files:
+        log_warning(f"No WIF files found for baseline {baseline_minor}")
+        return {}
+
+    log_success(f"Copied {len(files)} WIF template files from {baseline_minor}")
+    return files
+
+
 def read_gap_report(report_path):
     """Read and parse gap analysis JSON report."""
     with open(report_path, 'r') as f:
@@ -200,95 +308,270 @@ def validate_wif_pattern_consistency(target_version):
 
 def copy_and_update_wif_template(baseline_version, target_version):
     """
-    Copy WIF template from baseline and update version patterns.
+    Copy ALL WIF files from baseline and update version patterns.
+
+    Strategy:
+    1. Copy all WIF files from baseline version (preserves any additional files)
+    2. Update version patterns in vanilla.yaml
 
     Transformations:
     - id: v{baseline} → id: v{target}
     - role IDs: *_v{baseline} → *_v{target}
 
-    Returns: dict with 'vanilla.yaml' -> content
+    Returns: dict with filename -> content
     """
     baseline_minor = extract_minor_version(baseline_version)
     target_minor = extract_minor_version(target_version)
 
-    log_info(f"Copying WIF template from {baseline_minor} and updating to {target_minor}...")
+    log_info(f"Copying WIF files from {baseline_minor} and updating to {target_minor}...")
 
-    # Fetch baseline template
-    template = fetch_previous_wif_template(baseline_version)
-    if not template:
-        log_error(f"Failed to fetch baseline template for {baseline_minor}")
+    # Copy all WIF files from baseline
+    all_files = copy_previous_wif_files(baseline_version)
+
+    if not all_files:
+        log_error(f"Failed to copy baseline WIF files for {baseline_minor}")
         return None
 
-    # Update top-level version ID
-    template['id'] = f"v{target_minor}"
+    # Update vanilla.yaml version patterns (if it exists)
+    if 'vanilla.yaml' in all_files:
+        template = all_files['vanilla.yaml']
 
-    # Update role IDs in service accounts
-    for sa in template['service_accounts']:
-        for role in sa.get('roles', []):
-            role_id = role['id']
-            # Replace version pattern: *_v4.21 → *_v4.22
-            role['id'] = re.sub(
-                r'_v' + re.escape(baseline_minor) + r'$',
-                f'_v{target_minor}',
-                role_id
-            )
+        # Update top-level version ID
+        template['id'] = f"v{target_minor}"
 
-    log_success(f"Updated {len(template['service_accounts'])} service accounts to v{target_minor}")
+        # Update role IDs in service accounts
+        for sa in template['service_accounts']:
+            for role in sa.get('roles', []):
+                role_id = role['id']
+                # Replace version pattern: *_v4.21 → *_v4.22
+                role['id'] = re.sub(
+                    r'_v' + re.escape(baseline_minor) + r'$',
+                    f'_v{target_minor}',
+                    role_id
+                )
 
-    return {'vanilla.yaml': template}
+        log_success(f"Updated {len(template['service_accounts'])} service accounts to v{target_minor}")
+
+    return all_files
 
 
-def generate_sts_policy_files(version, output_dir):
+def normalize_keys(data, reference_data=None):
     """
-    Generate STS policy files for a version.
+    Normalize JSON keys to match reference data casing.
 
-    Reuses extract_credential_requests() and convert_credential_requests_to_policy()
-    from gap-aws-sts.py
+    If reference_data provided, matches its key casing.
+    Otherwise, capitalizes standard IAM policy keys (Action, Effect, Resource, etc.)
 
-    Returns: dict mapping filename -> policy content
+    Args:
+        data: Dictionary to normalize
+        reference_data: Optional reference dictionary for key casing
+
+    Returns: Dictionary with normalized keys
     """
-    log_info(f"Extracting AWS STS credentials for {version}...")
+    if not isinstance(data, dict):
+        return data
 
-    # Extract credential requests (reuse existing function)
+    # Standard IAM policy key capitalization
+    standard_keys = {
+        'action': 'Action',
+        'effect': 'Effect',
+        'resource': 'Resource',
+        'condition': 'Condition',
+        'principal': 'Principal',
+        'notaction': 'NotAction',
+        'notresource': 'NotResource',
+        'sid': 'Sid'
+    }
+
+    result = {}
+
+    # If reference provided, use its key casing
+    if reference_data:
+        ref_keys_lower = {k.lower(): k for k in reference_data.keys()}
+
+    for key, value in data.items():
+        # Determine correct key casing
+        if reference_data and key.lower() in ref_keys_lower:
+            correct_key = ref_keys_lower[key.lower()]
+        elif key.lower() in standard_keys:
+            correct_key = standard_keys[key.lower()]
+        else:
+            correct_key = key
+
+        # Recursively normalize nested dicts and lists
+        if isinstance(value, dict):
+            ref_value = reference_data.get(correct_key) if reference_data else None
+            result[correct_key] = normalize_keys(value, ref_value)
+        elif isinstance(value, list):
+            result[correct_key] = [
+                normalize_keys(item, None) if isinstance(item, dict) else item
+                for item in value
+            ]
+        else:
+            result[correct_key] = value
+
+    return result
+
+
+def apply_statement_diff(baseline_statements, target_statements):
+    """
+    Apply diff from target statements to baseline statements.
+
+    Preserves baseline structure and only updates the Statement array.
+    Keeps baseline key casing.
+
+    Args:
+        baseline_statements: Original Statement array from baseline
+        target_statements: New Statement array from target CredentialRequest
+
+    Returns: Updated Statement array with normalized keys matching baseline
+    """
+    if not baseline_statements:
+        return target_statements
+
+    # Use first statement from baseline as reference for key casing
+    reference_stmt = baseline_statements[0] if baseline_statements else None
+
+    # Normalize target statements to match baseline casing
+    normalized_target = [
+        normalize_keys(stmt, reference_stmt)
+        for stmt in target_statements
+    ]
+
+    return normalized_target
+
+
+def extract_credreqs_map(version):
+    """
+    Extract CredentialRequests and create a mapping of CR metadata to statements.
+
+    Returns: dict mapping (namespace, name) tuple -> Statement array
+    """
+    log_info(f"Extracting CredentialRequests for {version}...")
+
     cr_dir = gap_aws_sts.extract_credential_requests(version, cloud="aws")
+    if not cr_dir:
+        return {}
 
-    # Get policy per file (reuse existing function)
-    policy_dict = gap_aws_sts.get_sts_policy(version)
-
-    # Convert to managed-cluster-config format
-    # File naming: openshift_{namespace}_{credname}_policy.json
-    files = {}
+    cr_map = {}
 
     for cr_file in Path(cr_dir).glob('*.yaml'):
-        # Parse credential request
         with open(cr_file, 'r') as f:
             cr_data = yaml.safe_load(f)
 
-        # Extract namespace and name
         metadata = cr_data.get('metadata', {})
-        namespace = metadata.get('namespace', 'unknown').replace('-', '_')
-        name = metadata.get('name', 'unknown').replace('-', '_')
+        namespace = metadata.get('namespace', '')
+        name = metadata.get('name', '')
 
-        # Get policy for this file
         spec = cr_data.get('spec', {})
         provider_spec = spec.get('providerSpec', {})
 
         if 'statementEntries' in provider_spec:
-            statements = provider_spec['statementEntries']
+            key = (namespace, name)
+            cr_map[key] = provider_spec['statementEntries']
 
-            # Build IAM policy
-            policy = {
-                "Version": "2012-10-17",
-                "Statement": statements
-            }
-
-            filename = f"openshift_{namespace}_{name}_policy.json"
-            files[filename] = policy
-
-    # Cleanup temp dir
+    # Cleanup
     shutil.rmtree(cr_dir, ignore_errors=True)
 
-    return files
+    log_success(f"Extracted {len(cr_map)} CredentialRequests")
+    return cr_map
+
+
+def match_baseline_file_to_credreq(filename, baseline_cr_map, target_cr_map):
+    """
+    Find matching CredentialRequest for a baseline policy file.
+
+    Strategy:
+    1. Try exact namespace/name match from filename
+    2. Try partial name matches
+    3. Return None if no match
+
+    Returns: target Statement array if match found, None otherwise
+    """
+    # Remove .json and parse filename parts
+    # Pattern: openshift_{namespace}_{name}_policy.json
+    name_parts = filename.replace('_policy.json', '').replace('openshift_', '').split('_')
+
+    if len(name_parts) < 2:
+        return None
+
+    # Try to reconstruct namespace and name
+    # Could be: namespace_name or namespace_name_name
+    for i in range(1, len(name_parts)):
+        namespace_parts = name_parts[:i]
+        name_parts_remaining = name_parts[i:]
+
+        namespace = '-'.join(namespace_parts)
+        name = '-'.join(name_parts_remaining)
+
+        # Try direct match in target
+        key = (namespace, name)
+        if key in target_cr_map:
+            return target_cr_map[key]
+
+        # Try with openshift- prefix variations
+        for ns_prefix in ['', 'openshift-']:
+            test_key = (ns_prefix + namespace, name)
+            if test_key in target_cr_map:
+                return target_cr_map[test_key]
+
+    # Try fuzzy match - find CR with similar name
+    filename_lower = filename.lower().replace('_', '').replace('-', '')
+
+    for (ns, name), statements in target_cr_map.items():
+        cr_id = f"{ns}{name}".lower().replace('_', '').replace('-', '')
+        if cr_id in filename_lower or filename_lower in cr_id:
+            log_info(f"  Fuzzy matched {filename} → ({ns}, {name})")
+            return statements
+
+    return None
+
+
+def generate_sts_policy_files(baseline_version, target_version):
+    """
+    Generate complete STS policy files for target version.
+
+    Strategy:
+    1. Copy ALL files from baseline version (exact copies, preserve structure)
+    2. Extract CredentialRequests from both baseline and target
+    3. For each baseline file, find matching target CredentialRequest
+    4. Apply ONLY the diff to file content, preserving structure and casing
+    5. Files without matching CRs are copied unchanged
+
+    Returns: dict mapping filename -> policy content
+    """
+    log_info(f"Generating STS policy files for {target_version}...")
+
+    # Step 1: Copy all files from baseline (exact copies)
+    all_files = copy_previous_sts_files(baseline_version)
+
+    if not all_files:
+        log_error("Failed to copy baseline files")
+        return {}
+
+    # Step 2: Extract CredentialRequests from both versions
+    baseline_cr_map = extract_credreqs_map(baseline_version)
+    target_cr_map = extract_credreqs_map(target_version)
+
+    # Step 3: Update files that have matching CredentialRequests
+    updated_count = 0
+    for filename, baseline_policy in all_files.items():
+        # Find matching CredentialRequest in target
+        target_statements = match_baseline_file_to_credreq(filename, baseline_cr_map, target_cr_map)
+
+        if target_statements:
+            # Found a match - update the Statement array
+            baseline_statements = baseline_policy.get('Statement', [])
+            updated_statements = apply_statement_diff(baseline_statements, target_statements)
+
+            # Update policy in-place
+            all_files[filename]['Statement'] = updated_statements
+            updated_count += 1
+            log_info(f"  ✓ Updated: {filename}")
+        # else: No matching CR, keep baseline file unchanged
+
+    log_success(f"Generated {len(all_files)} total STS files ({updated_count} updated based on CredentialRequest changes)")
+    return all_files
 
 
 def generate_wif_template(version, output_dir):
@@ -682,7 +965,7 @@ def main():
 
     if aws_failed:
         log_info("Generating AWS STS policy files...")
-        aws_sts_files = generate_sts_policy_files(target_version, output_dir)
+        aws_sts_files = generate_sts_policy_files(baseline_version, target_version)
         log_success(f"Generated {len(aws_sts_files)} AWS STS policy files")
 
         log_info("Generating AWS STS acknowledgment files...")

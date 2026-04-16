@@ -174,6 +174,16 @@ from reporters import generate_html_report, generate_json_report
 - Outputs failure-summary.md with missing files, permission changes, exact fix content
 - Use `--job-id` to analyze specific older failed jobs
 
+**File generation (ci/lib/generate-fixes.py):**
+- **Copy-first strategy**: Copies ALL files from previous version (baseline) to ensure completeness
+- **Preserve structure**: Filenames, JSON key casing, and file structure maintained from baseline
+- **Update only diffs**: Extracts CredentialRequests from both baseline and target, applies only permission changes
+- **No new files**: Updates existing files based on CR matches; infrastructure files (sts_installer_*, sts_instance_*, sts_ocm_*, sts_support_*, operator_iam_role_policy.json, osd_scp_policy.json) copied unchanged
+- **Key casing preservation**: Matches IAM policy format from baseline (Action/Effect/Resource capitalized)
+- **Fuzzy matching**: Maps target CredentialRequests to baseline filenames using namespace/name matching
+- **AWS STS**: Copies from `resources/sts/{baseline}/` → `resources/sts/{target}/`, updates matched CRs only
+- **GCP WIF**: Copies from `resources/wif/{baseline}/` → `resources/wif/{target}/`, updates version strings (v4.21 → v4.22)
+
 **Manual PR creator (ci/fix-prow-failure.sh):**
 - Generates files → validates (JSON, YAML, WIF via `validate-wif-template.sh`) → creates PR
 - WIF validation: service account ID (max 25 chars), role ID (max 50 chars), format checks; requires `yq`
@@ -204,7 +214,11 @@ from reporters import generate_html_report, generate_json_report
 - `openshift_releases.py` - Version resolution, Sippy queries, minor version extraction
 - `reporters.py` - Multi-format report generation
 - `ack_validation.py` - managed-cluster-config validation logic
-- `logging.sh`, `openshift-releases.sh` - Bash equivalents
+- `logging.sh` - Bash logging functions
+- `openshift-releases.sh` - Bash version resolution
+- `ci/lib/failure-parser.sh` - CI-specific Prow failure parsing utilities
+- `ci/lib/prow-api.sh` - CI-specific Prow API interaction utilities
+- `ci/lib/validate-wif-template.sh` - WIF template validation (service account/role ID constraints)
 
 ## Runtime Dependencies
 

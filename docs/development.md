@@ -19,7 +19,7 @@ scripts/
 ├── gap-feature-gates.py        # Feature gates analysis
 ├── gap-ocp-gate-ack.py         # OCP admin gate acknowledgments
 ├── gap-all.sh                  # Orchestrator
-├── generate-combined-report.py # Combined report
+├── generate-combined-report.py # Combined report aggregator
 ├── templates/                  # Jinja2 templates
 │   ├── aws-sts.html.j2
 │   ├── gcp-wif.html.j2

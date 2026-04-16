@@ -81,8 +81,8 @@ reports/gap-analysis-ocp-gate-ack_4.21_to_4.22_20260327_120000.json  # JSON
 ```
 
 **Exit Codes:**
-- `0`: Successful execution (regardless of upgrade readiness status)
-- `1`: Execution failure (e.g., missing tools, network errors, invalid versions)
+- `0`: Validation PASSED (CHECK #5 valid - all gates acknowledged or no gates required)
+- `1`: Validation FAILED (CHECK #5 failed - missing acknowledgment file or unacknowledged gates) OR execution failure (e.g., missing tools, network errors, invalid versions)
 
 **Version Resolution:**
 - CLI flags > Environment variables > Auto-detect
@@ -108,7 +108,7 @@ reports/gap-analysis-ocp-gate-ack_4.21_to_4.22_20260327_120000.json  # JSON
 
 ## Output
 
-The script outputs log messages and always exits 0 on successful execution:
+The script outputs log messages and exits based on validation result:
 
 **No admin gates (upgrade ready):**
 ```
@@ -120,7 +120,7 @@ The script outputs log messages and always exits 0 on successful execution:
 [SUCCESS] No admin gates in 4.21, upgrade to 4.22 requires no acknowledgments
 ```
 
-Exit code: `0` (successful execution, upgrade ready)
+Exit code: `0` (validation PASSED, upgrade ready)
 
 **Gates acknowledged (upgrade ready):**
 ```
@@ -138,7 +138,7 @@ Exit code: `0` (successful execution, upgrade ready)
 [SUCCESS] ✅ UPGRADE READY: All gates acknowledged for 4.20 → 4.21
 ```
 
-Exit code: `0` (successful execution, upgrade ready)
+Exit code: `0` (validation PASSED, upgrade ready)
 
 **Acknowledgment file missing (upgrade blocked):**
 ```
@@ -154,7 +154,7 @@ Exit code: `0` (successful execution, upgrade ready)
 [ERROR] ❌ UPGRADE NOT READY: 4.20 → 4.21
 ```
 
-Exit code: `0` (successful execution, but upgrade not ready)
+Exit code: `1` (validation FAILED - CHECK #5, upgrade not ready)
 
 **Unacknowledged gates (upgrade blocked):**
 ```
@@ -174,7 +174,7 @@ Exit code: `0` (successful execution, but upgrade not ready)
 [ERROR] ❌ UPGRADE NOT READY: 4.20 → 4.21
 ```
 
-Exit code: `0` (successful execution, but upgrade not ready)
+Exit code: `1` (validation FAILED - CHECK #5, upgrade not ready)
 
 ## Data Sources
 
@@ -193,15 +193,11 @@ Exit code: `0` (successful execution, but upgrade not ready)
 ## Use in CI/CD
 
 ```bash
-# Script always exits 0 on success
-python3 ./scripts/gap-ocp-gate-ack.py --baseline 4.20 --target 4.21
-
-# Check for upgrade readiness by parsing output
-if python3 ./scripts/gap-ocp-gate-ack.py --baseline 4.20 --target 4.21 2>&1 | grep -q "UPGRADE NOT READY"; then
-  echo "❌ Upgrade blocked - check reports for details"
-  exit 1
-else
+# Exit code reflects validation result: 0=PASSED, 1=FAILED
+if python3 ./scripts/gap-ocp-gate-ack.py --baseline 4.20 --target 4.21; then
   echo "✅ Upgrade ready"
+else
+  echo "❌ Upgrade blocked - check reports for details"
 fi
 
 # Use JSON report for programmatic analysis

@@ -4,7 +4,7 @@ description: >
   Analyze GCP Workload Identity Federation (WIF) policy gaps between OpenShift versions.
   Use when comparing WIF configurations, IAM roles, and service account permissions
   across OpenShift versions.
-  Logs detected policy differences but always exits 0 on successful execution.
+  Exits 0 when validation passes, exits 1 when validation fails or on execution error.
   Automatically generates comprehensive reports in HTML and JSON formats.
 compatibility:
   required_tools:
@@ -32,7 +32,7 @@ Analyze differences in GCP Workload Identity Federation policies between OpenShi
 2. Extract credential requests from release payloads using `oc adm release extract --cloud=gcp`
 3. Convert CredentialsRequest YAML manifests to GCP IAM policy format
 4. Compare IAM roles, permissions, and service account bindings
-5. Log detected differences and always exit 0 on successful execution
+5. Validate WIF templates against OCP release; exit 1 if validation fails (CHECK #3 or CHECK #4), exit 0 if validation passes
 
 ## Script Usage
 
@@ -85,8 +85,8 @@ reports/gap-analysis-gcp-wif_4.21_to_4.22_20260325_120000.json  # JSON
 ```
 
 **Exit Codes:**
-- `0`: Successful execution (regardless of whether differences were found)
-- `1`: Execution failure (e.g., missing tools, network errors, invalid versions)
+- `0`: Validation PASSED (CHECK #3 and CHECK #4 both valid)
+- `1`: Validation FAILED (CHECK #3 or CHECK #4 failed) OR execution failure (e.g., missing tools, network errors, invalid versions)
 
 **Version Resolution:**
 - CLI flags > Environment variables > Auto-detect
@@ -105,7 +105,7 @@ Note: Platform is always 'gcp' for this script.
 
 ## Output
 
-The script outputs log messages to stderr and always exits 0 on successful execution:
+The script outputs log messages to stderr and exits based on validation result:
 
 ```
 [INFO] Starting GCP WIF Policy Gap Analysis
@@ -119,7 +119,7 @@ The script outputs log messages to stderr and always exits 0 on successful execu
 [INFO] Policy differences detected: 5 added, 2 removed
 ```
 
-Exit code: `0` (successful execution, differences found)
+Exit code: `0` (validation PASSED) or `1` (validation FAILED - CHECK #3 or #4)
 
 Or:
 
@@ -127,18 +127,15 @@ Or:
 [SUCCESS] No policy differences found between 4.21 and 4.22
 ```
 
-Exit code: `0` (successful execution, no differences)
+Exit code: `0` (validation PASSED, no differences)
 
 **Use in CI/CD:**
 ```bash
-# Script always exits 0 on success
-python3 ./scripts/gap-gcp-wif.py --baseline 4.21 --target 4.22
-
-# Check for differences by parsing output
-if python3 ./scripts/gap-gcp-wif.py --baseline 4.21 --target 4.22 2>&1 | grep -q "Policy differences detected"; then
-  echo "Policy changes detected - review reports/"
+# Exit code reflects validation result: 0=PASSED, 1=FAILED
+if python3 ./scripts/gap-gcp-wif.py --baseline 4.21 --target 4.22; then
+  echo "Validation passed - safe to proceed"
 else
-  echo "No policy changes - safe to proceed"
+  echo "Validation failed - WIF templates missing or outdated"
 fi
 
 # Use JSON report for programmatic analysis
@@ -183,6 +180,6 @@ firefox reports/gap-analysis-gcp-wif_*.html
 - Suggest pre-upgrade validation steps
 
 **CI/CD Integration:**
-- Parse script output to detect policy changes (exit codes only indicate execution success/failure)
-- Script always exits 0 on successful execution regardless of differences
-- Automate notifications when policies differ by parsing log messages
+- Use exit codes directly: exit 1 means validation failed (CHECK #3 or CHECK #4)
+- Script exits 0 only when all validation checks pass
+- Parse JSON reports for detailed per-check results

@@ -188,7 +188,7 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 
 The check numbering is consistent across:
 - Console output
-- Report files (Markdown, HTML, JSON)
+- Report files (HTML, JSON)
 - Exit codes
 - Log messages
 

@@ -29,7 +29,10 @@ scripts/
 └── lib/
     ├── common.py               # Utilities
     ├── openshift_releases.py   # Version resolution
-    └── reporters.py            # Report generation
+    ├── reporters.py            # Report generation
+    ├── ack_validation.py       # managed-cluster-config validation
+    ├── logging.sh              # Bash logging utilities
+    └── openshift-releases.sh   # Bash version resolution
 ```
 
 ## Testing

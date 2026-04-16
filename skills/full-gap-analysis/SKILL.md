@@ -4,7 +4,7 @@ description: >
   Comprehensive gap analysis between OpenShift versions covering AWS STS policies,
   GCP WIF policies, feature gates, and OCP admin gate acknowledgments. Use when
   performing complete version upgrade assessment for managed OpenShift (OSD, ROSA).
-  Logs detected differences but always exits 0 on successful execution.
+  Exits 1 if any validation check (CHECK #1-5) fails; exits 0 if all checks pass.
 compatibility:
   required_tools:
     - oc
@@ -104,52 +104,45 @@ The script:
 - Runs feature gate analysis (Python)
 - Runs OCP admin gate acknowledgment analysis (Python)
 - Generates JSON reports for each analysis (used for combined report)
-- Generates combined report aggregating all analyses (MD, HTML, JSON)
+- Generates combined report aggregating all analyses (HTML, JSON)
 - Logs detected differences to stdout/stderr
-- Always exits 0 on successful execution (regardless of differences)
-- Only exits 1 on execution failures (missing tools, network errors, etc.)
+- Exits 1 if any validation check (CHECK #1-5) fails
+- Exits 0 only when all validation checks pass
+- Also exits 1 on execution failures (missing tools, network errors, etc.)
 
 **Report Files Generated:**
 - `reports/gap-analysis-aws-sts_*.json` (individual JSON only)
 - `reports/gap-analysis-gcp-wif_*.json` (individual JSON only)
 - `reports/gap-analysis-feature-gates_*.json` (individual JSON only)
 - `reports/gap-analysis-ocp-gate-ack_*.json` (individual JSON only)
-- `reports/gap-analysis-full_*.{md,html,json}` (combined report with all analyses)
+- `reports/gap-analysis-full_*.{html,json}` (combined report with all analyses)
 
 **Use in CI/CD:**
 ```bash
-# Auto-detect versions (script always exits 0 on success)
-./scripts/gap-all.sh
+# Exit code reflects validation result: 0=all checks passed, 1=one or more checks failed
+if ./scripts/gap-all.sh; then
+  echo "All validation checks passed - safe to proceed"
+else
+  echo "Validation failed - review reports for details"
+fi
 
 # Test against nightly
 TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
-
-# Check for differences by parsing output
-if ./scripts/gap-all.sh 2>&1 | grep -q "Policy differences detected"; then
-  echo "Policy changes detected - review recommended"
-else
-  echo "No policy changes - safe to proceed"
-fi
 ```
 
 ### Step 3: Interpret Results
 
 The script provides pass/fail indication via exit codes. For detailed analysis:
 
-**Extract comparison data manually:**
+**Extract comparison data from JSON reports:**
 ```bash
-# Source the functions
-source scripts/lib/common.sh
-source scripts/gap-aws-sts.sh  # or gap-gcp-wif.sh
+# Run analysis to generate reports
+python3 ./scripts/gap-aws-sts.py --baseline 4.21 --target 4.22
 
-# Extract policies
-baseline_policy=$(mktemp)
-target_policy=$(mktemp)
-get_sts_policy "4.21" > "$baseline_policy"
-get_sts_policy "4.22" > "$target_policy"
-
-# Compare and analyze
-compare_sts_policies "$baseline_policy" "$target_policy" | jq '.'
+# Extract specific data from JSON report
+jq '.comparison.actions.target_only' reports/gap-analysis-aws-sts_*.json  # Added actions
+jq '.comparison.actions.baseline_only' reports/gap-analysis-aws-sts_*.json  # Removed actions
+jq '.validation' reports/gap-analysis-aws-sts_*.json  # Validation results
 ```
 
 ### Step 4: Perform Deep Analysis
@@ -162,7 +155,7 @@ Go beyond the scripts by:
 
 ## Output
 
-The script outputs log messages for both platforms and always exits 0 on successful execution:
+The script outputs log messages for both platforms and exits based on validation results:
 
 **No differences:**
 ```
@@ -186,7 +179,7 @@ The script outputs log messages for both platforms and always exits 0 on success
 [INFO] Gap Analysis Complete!
 [SUCCESS] No policy, feature gate differences, or gate acknowledgment issues found
 ```
-Exit code: `0` (successful execution, no differences)
+Exit code: `0` (all validation checks PASSED)
 
 **Differences found:**
 ```
@@ -214,7 +207,7 @@ Exit code: `0` (successful execution, no differences)
 [INFO] Feature Gates: Differences detected
 [INFO] Differences detected - review recommended
 ```
-Exit code: `0` (successful execution, differences found)
+Exit code: `0` (validation PASSED) or `1` (validation FAILED - one or more checks failed)
 
 ## Comparison Scenarios
 
@@ -229,7 +222,7 @@ Analyzes all of:
 - Feature gate changes
 - OCP admin gate acknowledgments
 
-Logs differences but always exits 0 on successful execution.
+Exits 1 if any validation check (CHECK #1-5) fails; exits 0 if all checks pass.
 
 ## Enhanced Analysis
 
@@ -296,7 +289,7 @@ TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
 [SUCCESS] No feature gate differences found between 4.21 and 4.22
 [SUCCESS] No policy or feature gate differences found
 ```
-Exit code: `0` - Successful execution, no differences
+Exit code: `0` - All validation checks PASSED
 
 **If changes detected:**
 ```
@@ -312,7 +305,7 @@ Exit code: `0` - Successful execution, no differences
 [INFO] Feature Gates: Differences detected
 [INFO] Differences detected - review recommended
 ```
-Exit code: `0` - Successful execution, differences found
+Exit code: `0` (validation PASSED) or `1` (validation FAILED - CHECK #1-5)
 
 **Next steps when changes detected:**
 1. Run individual platform scripts to get detailed information

@@ -181,8 +181,8 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 - **Exit 1 (FAIL):** Only on execution error (network, invalid version, etc.)
 
 ### Combined Script (gap-all.sh)
-- **Exit 0 (PASS):** All checks 1-5 passed (check 6 is informational)
-- **Exit 1 (FAIL):** Any of checks 1-5 failed OR execution error
+- **Exit 0 (PASS):** All checks 1-5 passed and feature gates script ran without execution error
+- **Exit 1 (FAIL):** Any of checks 1-5 failed, OR execution error in any script (including feature gates)
 
 ## CI/CD Integration
 

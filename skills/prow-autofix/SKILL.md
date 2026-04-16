@@ -262,9 +262,9 @@ export FORK_REPO="different-user/managed-cluster-config"
    - Prompts user to set token
 
 3. **PR already exists:**
-   - Checks for existing branch
-   - Returns existing PR URL
-   - Does not create duplicate
+   - Checks for existing open PR for the same branch
+   - Updates the existing PR (title, body, and adds update comment)
+   - Does not create a duplicate PR
 
 4. **Validation failure:**
    - Shows which file failed validation

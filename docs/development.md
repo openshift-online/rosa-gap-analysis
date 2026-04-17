@@ -5,8 +5,8 @@ Guide for contributing to gap analysis scripts.
 ## Setup
 
 ```bash
-git clone https://github.com/your-org/gap-analysis.git
-cd gap-analysis
+git clone https://github.com/openshift-online/rosa-gap-analysis.git
+cd rosa-gap-analysis
 pip install -r requirements.txt
 ```
 

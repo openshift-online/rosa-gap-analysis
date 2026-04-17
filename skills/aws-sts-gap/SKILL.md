@@ -105,41 +105,7 @@ Note: Platform is always 'aws' for this script.
 
 **This uses the same approach as osdctl** for data extraction.
 
-### Step 3: Data Extraction (Automated)
-
-The script uses `oc adm release extract` to extract credential requests:
-
-**oc adm release extract** (Same as osdctl)
-- Directly extracts CredentialsRequest manifests from release image payloads on quay.io
-- Command: `oc adm release extract quay.io/openshift-release-dev/ocp-release:X.Y.Z-x86_64 --credentials-requests --cloud=aws`
-- Official, authoritative source - guaranteed to match the actual release
-- Requires: `oc` CLI installed and accessible
-
-### Step 4: Policy Conversion and Comparison
-
-**Policy Conversion:**
-The script converts CredentialsRequest YAML manifests to IAM policy JSON:
-- Parses `spec.providerSpec.statementEntries` from each CredentialsRequest
-- Normalizes lowercase keys (`effect`, `action`, `resource`) to IAM format (`Effect`, `Action`, `Resource`)
-- Consolidates all statements into a unified policy document
-- Removes duplicate statements
-
-**Typical Credential Request Files Processed:**
-1. `0000_30_cluster-api_01_credentials-request.yaml` - Cluster API operations
-2. `0000_30_machine-api-operator_00_credentials-request.yaml` - Machine/node management
-3. `0000_50_cloud-credential-operator_05-iam-ro-credentialsrequest.yaml` - IAM read-only
-4. `0000_50_cluster-image-registry-operator_01-registry-credentials-request.yaml` - Image registry
-5. `0000_50_cluster-ingress-operator_00-ingress-credentials-request.yaml` - Ingress/load balancers
-6. `0000_50_cluster-network-operator_02-cncc-credentials.yaml` - Networking
-7. `0000_50_cluster-storage-operator_03_credentials_request_aws.yaml` - Storage volumes
-
-**Comparison Analysis:**
-- **Action-level changes**: Specific IAM permissions added/removed (e.g., `ec2:CreateTags`)
-- **Service-level changes**: New/removed AWS service integrations (e.g., new `elasticloadbalancing` service)
-- **Resource scope changes**: Changes to resource ARNs or wildcards
-- **Statement deduplication**: Automatic cleanup to avoid false positives
-
-### Step 5: Interpret Results
+### Step 3: Interpret Results
 
 The script exits based on validation result:
 - **Exit 0**: Validation PASSED (all policy files are present and match OCP release)

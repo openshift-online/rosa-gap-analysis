@@ -9,6 +9,7 @@ compatibility:
   required_tools:
     - oc
     - jq
+    - curl
     - python3
     - PyYAML
 ---

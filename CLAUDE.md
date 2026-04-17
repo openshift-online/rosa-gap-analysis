@@ -107,7 +107,8 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 - Feature gates runs last, aggregates reports via `generate-combined-report.py`, exits 1 on failures
 
 **Version resolution (openshift_releases.py/sh):**
-- Auto-detect: queries Sippy API for latest stable (baseline) and candidate (target)
+- Auto-detect: queries `amd64.ocp.releases.ci.openshift.org` for latest stable (baseline) and candidate (target)
+- Sippy API used only for GA date lookup (nightly path)
 - Keywords: `NIGHTLY` → latest dev nightly, `CANDIDATE` → latest dev candidate
 - Minor version normalization: `4.21.7` → `4.21` for feature gates API
 
@@ -139,7 +140,7 @@ from reporters import generate_html_report, generate_json_report
 
 **Container (ci/Containerfile):**
 - Base: UBI9
-- Includes: `oc` CLI, Python 3, PyYAML, curl, bash
+- Includes: `oc` CLI, Python 3, PyYAML, Jinja2, `jq`, `yq`, `curl`, `git`, `make`, bash
 - Scripts pre-installed at `/gap-analysis/scripts/` and in PATH
 - Writable temp dirs (`/tmp/.cache`, `/tmp/gap-analysis-data`) for random UID support
 - Working directory: `/gap-analysis`

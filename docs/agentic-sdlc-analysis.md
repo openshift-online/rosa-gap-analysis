@@ -2,7 +2,7 @@
 
 **Repository:** gap-analysis  
 **Analysis Date:** 2026-04-16  
-**Claude Code Version:** Sonnet 4.5
+**Claude Code Version:** Sonnet 4.6
 
 ---
 
@@ -719,6 +719,11 @@ The agentic approach transforms development from "remember to update 8 files" to
 
 ## Recent Updates
 
+**2026-04-16 (Update 5):** Documentation accuracy review against codebase:
+- docs-reviewer: Updated `docs/reports.md` combined report section to accurately describe `GAP_FULL_REPORT=1` behavior (individual HTML skipped; only JSON per script + combined HTML/JSON generated)
+- docs-reviewer: Updated `docs/development.md` template variables example to include all actual keys (`validation_result`, `validation_checked`, `validation_details`, `summary`) from report_data
+- docs-reviewer: Updated Claude Code version from Sonnet 4.5 → Sonnet 4.6 and repository version to commit 048b3ea
+
 **2026-04-16 (Update 4):** Full subagent consistency verification run:
 - docs-reviewer: Fixed broken links in README.md (`docs/installation.md` → `docs/getting-started.md`, removed nonexistent `docs/ci-integration.md` references, corrected `./ci/prow/analyze-failure.sh` → `./ci/analyze-prow-failure.sh`), corrected exit code documentation, fixed report location and template customization descriptions
 - skills-reviewer, claude-md-updater, cleanup-analyzer: Verified consistency across skills, CLAUDE.md, and codebase
@@ -757,5 +762,5 @@ The agentic approach transforms development from "remember to update 8 files" to
 ---
 
 **Report Generated:** 2026-04-16  
-**Analysis Tool:** Claude Code (Sonnet 4.5)  
-**Repository Version:** commit 84bd0e1
+**Analysis Tool:** Claude Code (Sonnet 4.6)  
+**Repository Version:** commit 048b3ea

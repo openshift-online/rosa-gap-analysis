@@ -8,7 +8,6 @@ description: >
 compatibility:
   required_tools:
     - python3
-    - curl (for GitHub API access)
     - PyYAML (for YAML processing)
 ---
 

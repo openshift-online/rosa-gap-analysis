@@ -72,12 +72,20 @@ Template variables available:
     'baseline': '4.21.7',
     'target': '4.22.0-ec.4',
     'timestamp': '2026-03-25T15:41:33',
+    'validation_result': 'PASS',        # 'PASS' or 'FAIL'
+    'validation_checked': True,          # Whether validation ran
+    'validation_details': {...},         # Check #1 and #2 results
     'comparison': {
         'actions': {
             'target_only': [...],
             'baseline_only': [...],
             'common': [...]
         }
+    },
+    'summary': {
+        'added': 3,
+        'removed': 1,
+        'total_changes': 4
     }
 }
 ```

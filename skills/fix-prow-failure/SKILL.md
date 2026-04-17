@@ -140,9 +140,9 @@ cat ~/prow-analysis/failure-summary.md
 - Ensures the PR is in the same state as what CI will verify
 
 **PR replacement:**
-- If a PR already exists for the same branch (`ocp-X.XX-gap-analysis-update`), it will be automatically closed
-- A new PR is created immediately with the updated changes
-- Closure is logged with comment: "Closing this PR to create a new one with updated gap-analysis changes"
+- If a PR already exists for the same branch (`ocp-X.XX-gap-analysis-update`), it will be automatically updated
+- The existing PR title and body are updated with the latest gap-analysis results
+- An update comment is added to the PR indicating the new changes
 
 ## Options
 

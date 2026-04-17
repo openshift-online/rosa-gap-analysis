@@ -118,10 +118,16 @@ When running the full gap analysis orchestrator:
 bash scripts/gap-all.sh --baseline 4.20 --target 4.21
 ```
 
-**Generates individual reports for each analysis PLUS a combined report:**
+**Generates JSON reports per script (no individual HTML) PLUS a combined HTML and JSON report:**
 
+- `gap-analysis-aws-sts_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+- `gap-analysis-gcp-wif_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+- `gap-analysis-ocp-gate-ack_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+- `gap-analysis-feature-gates_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
 - `gap-analysis-full_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
 - `gap-analysis-full_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+
+> **Note:** When `gap-all.sh` runs, it sets `GAP_FULL_REPORT=1` which causes individual scripts to skip generating HTML reports. Only JSON files are generated per-script; the combined HTML report aggregates all results.
 
 **Combined Report Contents (All 6 Checks):**
 - **Check 1:** AWS STS Resources validation

@@ -9,7 +9,6 @@ compatibility:
   required_tools:
     - python3
     - curl (for Sippy API access)
-    - PyYAML (for YAML processing)
 ---
 
 # Feature Gate Gap Analysis

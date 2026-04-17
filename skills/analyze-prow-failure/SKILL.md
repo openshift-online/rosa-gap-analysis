@@ -31,7 +31,7 @@ Analyzes most recent Prow CI job for gap-analysis validation failures.
 - Generates failure summary with file content needed
 
 **Work Directory:**
-- Default: `/tmp/gap-analysis-XXXXXX` (temporary)
+- Default: `.tmp/gap-work/analysis-XXXXXX` (temporary, within repo)
 - Custom: `--work-dir ~/prow-analysis` (persistent)
 - Outputs path on last line for use by fix-prow-failure.sh
 
@@ -62,13 +62,13 @@ cat ~/prow-analysis/failure-summary.md
 
 **Successful analysis:**
 ```
-[INFO] Created temporary work directory: /tmp/gap-analysis-AbCd12
+[INFO] Created temporary work directory: .tmp/gap-work/analysis-AbCd12
 [INFO] Finding latest failed job...
 [SUCCESS] Found failed job: 2041035894848229376
 [SUCCESS] Downloaded artifacts
 [SUCCESS] ✅ Analysis complete!
-[SUCCESS] Work directory: /tmp/gap-analysis-AbCd12/
-/tmp/gap-analysis-AbCd12
+[SUCCESS] Work directory: .tmp/gap-work/analysis-AbCd12/
+.tmp/gap-work/analysis-AbCd12
 ```
 
 **Graceful exit (no failures):**

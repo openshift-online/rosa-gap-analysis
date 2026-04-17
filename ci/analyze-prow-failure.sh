@@ -66,7 +66,7 @@ BEHAVIOR:
 OPTIONS:
     -j, --job-name NAME    Job name to analyze (default: ${DEFAULT_JOB_NAME})
     -i, --job-id ID        Specific job ID to analyze (for older failed jobs)
-    -w, --work-dir DIR     Work directory for artifacts (default: /tmp/gap-analysis-XXXXXX)
+    -w, --work-dir DIR     Work directory for artifacts (default: .tmp/gap-work/analysis-XXXXXX)
     -k, --keep-work-dir    Keep temporary work directory after completion
     -h, --help            Display this help message
 

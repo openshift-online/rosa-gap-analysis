@@ -102,7 +102,7 @@ export GH_TOKEN="<your-token>"
 
 [INFO] STEP 1/3: Analyzing latest failed Prow job...
 [SUCCESS] Found failed job: 2041035894848229376
-[SUCCESS] Analysis complete. Work directory: /tmp/gap-analysis-XxXxXx
+[SUCCESS] Analysis complete. Work directory: .tmp/gap-work/analysis-XxXxXx
 
 [INFO] STEP 2/3: Generating fix files and validating...
 [SUCCESS] Generated 12 files
@@ -125,7 +125,7 @@ PR URL: https://github.com/openshift/managed-cluster-config/pull/12345
 ======================================================================
 
 [INFO] STEP 1/3: Analyzing latest failed Prow job...
-[SUCCESS] ✓ Analysis complete. Work directory: /tmp/gap-analysis-XxXxXx
+[SUCCESS] ✓ Analysis complete. Work directory: .tmp/gap-work/analysis-XxXxXx
 
 [INFO] STEP 2/3: Generating fix files and validating...
 [INFO] STEP 3/3: Creating pull request...
@@ -147,7 +147,7 @@ PR URL: https://github.com/openshift/managed-cluster-config/pull/12345
 **Dry run mode:**
 ```
 [SUCCESS] ✓ Dry run complete (no PR created)
-[INFO] Review generated files in: /tmp/gap-analysis-XxXxXx
+[INFO] Review generated files in: .tmp/gap-work/analysis-XxXxXx
 ```
 
 ## Options

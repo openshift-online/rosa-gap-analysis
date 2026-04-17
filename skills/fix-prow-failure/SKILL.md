@@ -59,10 +59,10 @@ cat ~/prow-analysis/failure-summary.md
 
 ```bash
 # Generate and validate only (no PR)
-./ci/fix-prow-failure.sh --work-dir /tmp/gap-analysis-AbCd12
+./ci/fix-prow-failure.sh --work-dir .tmp/gap-work/analysis-AbCd12
 
 # Generate, validate, and create PR
-./ci/fix-prow-failure.sh --work-dir /tmp/gap-analysis-AbCd12 --create-pr
+./ci/fix-prow-failure.sh --work-dir .tmp/gap-work/analysis-AbCd12 --create-pr
 ```
 
 **What happens:**
@@ -84,7 +84,7 @@ cat ~/prow-analysis/failure-summary.md
 ## Output
 
 ```
-[INFO] Reading gap analysis report: /tmp/gap-analysis-AbCd12/gap-analysis-full_*.json
+[INFO] Reading gap analysis report: .tmp/gap-work/analysis-AbCd12/gap-analysis-full_*.json
 [INFO] Generating AWS STS policy files...
 [SUCCESS] Generated 7 AWS STS policy files
 

@@ -170,7 +170,7 @@ from reporters import generate_html_report, generate_json_report
 - Checks most recent Prow job; downloads artifacts from GCS if failed
 - Exits gracefully if most recent job is successful
 - Parses JSON report → extracts validation failures (CHECK #1-5) → generates fix content
-- Work directory: `/tmp/gap-analysis-*` (temp) or `--work-dir` (persistent)
+- Work directory: `.tmp/gap-work/analysis-*` (temp) or `--work-dir` (persistent)
 - Outputs failure-summary.md with missing files, permission changes, exact fix content
 - Use `--job-id` to analyze specific older failed jobs
 

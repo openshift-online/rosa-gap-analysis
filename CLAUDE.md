@@ -52,7 +52,7 @@ Claude follows an impact-based approach in this repository:
 - managed-cluster-config GitHub repo → validates policy files and acknowledgments
 
 **Key Patterns:**
-- **Exit codes**: Exit 0 on successful execution even when differences found; exit 1 only on execution errors
+- **Exit codes**: Exit 0 when all validation passes; exit 1 on validation failure (checks 1-5) or execution errors; check 6 (feature gates) always exits 0 on successful execution
 - **Version resolution**: CLI flags > env vars > auto-detect (Sippy API)
 - **Reports**: All scripts generate HTML/JSON simultaneously using Jinja2 templates
 - **Validation**: 6 globally numbered checks; checks 1-5 can FAIL, check 6 (feature gates) is informational only

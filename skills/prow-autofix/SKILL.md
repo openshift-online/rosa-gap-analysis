@@ -264,9 +264,9 @@ export FORK_REPO="different-user/managed-cluster-config"
    - Prompts user to set token
 
 3. **PR already exists:**
-   - Checks for existing branch
-   - Returns existing PR URL
-   - Does not create duplicate
+   - Closes existing PR for same branch with comment
+   - Creates new PR immediately with updated changes
+   - Logs: "Closing this PR to create a new one with updated gap-analysis changes"
 
 4. **Validation failure:**
    - Shows which file failed validation
@@ -277,5 +277,5 @@ export FORK_REPO="different-user/managed-cluster-config"
 
 - **Temporary directory:** Automatically created and cleaned up after success
 - **Failure preservation:** Work directory preserved on error for debugging
-- **No duplicate PRs:** Checks for existing branch before creating new PR
+- **PR replacement:** Closes existing PR for same branch; creates new PR with updated changes
 - **Graceful degradation:** Handles missing artifacts, successful jobs gracefully

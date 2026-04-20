@@ -60,9 +60,17 @@ def validate_sts_acknowledgment(baseline, target, comparison=None, baseline_cr_d
     # Pass expected changes from OCP release comparison to validation
     expected_changes = None
     if comparison:
+        # Aggregate all per-file changes (not just globally new actions)
+        # A permission may be new to one file but already exist in another
+        all_added = set()
+        all_removed = set()
+        for file_change in comparison.get('file_changes', []):
+            all_added.update(file_change.get('actions_added', []))
+            all_removed.update(file_change.get('actions_removed', []))
+
         expected_changes = {
-            'actions_added': comparison['actions']['target_only'],
-            'actions_removed': comparison['actions']['baseline_only']
+            'actions_added': list(all_added),
+            'actions_removed': list(all_removed)
         }
 
     resources_result = validate_sts_resources(expected_baseline, target_minor, expected_changes, baseline_cr_dir, target_cr_dir)

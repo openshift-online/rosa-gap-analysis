@@ -474,7 +474,15 @@ Exit Codes:
     validation_checked = True
 
     # Extract added actions for validation (if any changes detected)
-    added_actions = comparison['actions']['target_only'] if total_changes > 0 else None
+    # Aggregate all per-file changes (not just globally new actions)
+    # A permission may be new to one file but already exist in another
+    added_actions = None
+    if total_changes > 0:
+        all_added = set()
+        for file_change in comparison.get('file_changes', []):
+            all_added.update(file_change.get('actions_added', []))
+        added_actions = list(all_added) if all_added else None
+
     validation_details = validate_wif_acknowledgment(baseline, target, added_actions)
 
     check_1 = validation_details['check_1_resources']

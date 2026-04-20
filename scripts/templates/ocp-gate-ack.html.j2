@@ -214,6 +214,59 @@
             </tbody>
         </table>
 
+        <h2>Acknowledgment Structure Validation</h2>
+
+        {% if structure_validation %}
+        <div class="alert {% if structure_validation.valid %}success{% else %}error{% endif %}">
+            <h3>{% if structure_validation.valid %}✅{% else %}❌{% endif %} Structure Validation</h3>
+
+            {% if summary.gates_requiring_ack == 0 %}
+            <p><strong>Expected behavior (no gates):</strong> Both <code>config.yaml</code> and <code>admin-ack.yaml</code> must be absent</p>
+            <table style="width: 60%; margin: 10px 0;">
+                <tbody>
+                    <tr>
+                        <td>config.yaml</td>
+                        <td style="text-align: center; font-weight: bold;">{% if structure_validation.config_exists %}<span style="color: #f44336;">❌ Present (should be absent)</span>{% else %}<span style="color: #4caf50;">✅ Absent</span>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <td>admin-ack.yaml</td>
+                        <td style="text-align: center; font-weight: bold;">{% if structure_validation.ack_exists %}<span style="color: #f44336;">❌ Present (should be absent)</span>{% else %}<span style="color: #4caf50;">✅ Absent</span>{% endif %}</td>
+                    </tr>
+                </tbody>
+            </table>
+            {% else %}
+            <p><strong>Expected behavior (gates exist):</strong> Both <code>config.yaml</code> and <code>admin-ack.yaml</code> must be present</p>
+            <table style="width: 60%; margin: 10px 0;">
+                <tbody>
+                    <tr>
+                        <td>config.yaml</td>
+                        <td style="text-align: center; font-weight: bold;">{% if structure_validation.config_exists %}<span style="color: #4caf50;">✅ Present</span>{% else %}<span style="color: #f44336;">❌ Missing</span>{% endif %}</td>
+                    </tr>
+                    <tr>
+                        <td>admin-ack.yaml</td>
+                        <td style="text-align: center; font-weight: bold;">{% if structure_validation.ack_exists %}<span style="color: #4caf50;">✅ Present</span>{% else %}<span style="color: #f44336;">❌ Missing</span>{% endif %}</td>
+                    </tr>
+                    {% if structure_validation.actual_baseline %}
+                    <tr>
+                        <td>config.yaml baseline version</td>
+                        <td style="text-align: center; font-weight: bold;"><span style="color: #4caf50;">✅ {{ structure_validation.actual_baseline }}</span></td>
+                    </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+            {% endif %}
+
+            {% if structure_validation.errors %}
+            <h4>Validation Errors:</h4>
+            <ul>
+                {% for error in structure_validation.errors %}
+                <li style="color: #721c24;">{{ error }}</li>
+                {% endfor %}
+            </ul>
+            {% endif %}
+        </div>
+        {% endif %}
+
         <h2>Details</h2>
 
         {% if summary.gates_requiring_ack == 0 %}

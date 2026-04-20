@@ -189,10 +189,6 @@
             background-color: #007bff;
             color: white;
         }
-        .permission-list li .badge.file-only {
-            background-color: #ffc107;
-            color: #212529;
-        }
 
         /* Feature Gates */
         .chart-container {
@@ -312,24 +308,39 @@
             {% set info_count = 0 %}
 
             {% if aws_sts %}
-                {% if aws_sts.validation_result == 'FAIL' %}{% set critical_count = critical_count + 1 %}{% endif %}
+                {% if aws_sts.validation_result == 'FAIL' %}
+                    {% set critical_count = critical_count + 1 %}
+                {% elif aws_sts.validation_result == 'PASS' %}
+                    {% set success_count = success_count + 1 %}
+                {% endif %}
                 {% set aws_added = aws_sts.comparison.actions.target_only|length %}
                 {% set aws_removed = aws_sts.comparison.actions.baseline_only|length %}
-                {% if aws_added + aws_removed > 0 %}{% set warning_count = warning_count + 1 %}{% else %}{% set success_count = success_count + 1 %}{% endif %}
+                {% if aws_added + aws_removed > 0 %}{% set warning_count = warning_count + 1 %}{% endif %}
             {% endif %}
 
             {% if gcp_wif %}
-                {% if gcp_wif.validation_result == 'FAIL' %}{% set critical_count = critical_count + 1 %}{% endif %}
+                {% if gcp_wif.validation_result == 'FAIL' %}
+                    {% set critical_count = critical_count + 1 %}
+                {% elif gcp_wif.validation_result == 'PASS' %}
+                    {% set success_count = success_count + 1 %}
+                {% endif %}
                 {% set gcp_added = gcp_wif.comparison.actions.target_only|length %}
                 {% set gcp_removed = gcp_wif.comparison.actions.baseline_only|length %}
-                {% if gcp_added + gcp_removed > 0 %}{% set warning_count = warning_count + 1 %}{% else %}{% set success_count = success_count + 1 %}{% endif %}
+                {% if gcp_added + gcp_removed > 0 %}{% set warning_count = warning_count + 1 %}{% endif %}
             {% endif %}
 
             {% if ocp_gate_ack %}
-                {% if ocp_gate_ack.validation_result == 'FAIL' %}{% set critical_count = critical_count + 1 %}{% endif %}
+                {% if ocp_gate_ack.validation_result == 'FAIL' %}
+                    {% set critical_count = critical_count + 1 %}
+                {% elif ocp_gate_ack.validation_result == 'PASS' %}
+                    {% set success_count = success_count + 1 %}
+                {% endif %}
             {% endif %}
 
             {% if feature_gates %}
+                {% if feature_gates.validation_result == 'PASS' %}
+                    {% set success_count = success_count + 1 %}
+                {% endif %}
                 {% set info_count = info_count + 1 %}
             {% endif %}
 
@@ -567,9 +578,6 @@
                         {% for action in file_info.actions_added %}
                         <li class="added">
                             <code>{{ action }}</code>
-                            {% if action not in aws_sts.comparison.actions.target_only %}
-                            <span class="badge file-only">File-specific</span>
-                            {% endif %}
                         </li>
                         {% endfor %}
                         {% for action in file_info.actions_removed %}
@@ -700,9 +708,6 @@
                         {% for action in file_info.permissions_added %}
                         <li class="added">
                             <code>{{ action }}</code>
-                            {% if action not in gcp_wif.comparison.actions.target_only %}
-                            <span class="badge file-only">File-specific</span>
-                            {% endif %}
                         </li>
                         {% endfor %}
                         {% for action in file_info.permissions_removed %}

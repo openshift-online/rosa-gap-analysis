@@ -32,7 +32,7 @@ Analyze differences in GCP Workload Identity Federation policies between OpenShi
 2. Extract credential requests from release payloads using `oc adm release extract --cloud=gcp`
 3. Convert CredentialsRequest YAML manifests to GCP IAM policy format
 4. Compare IAM roles, permissions, and service account bindings
-5. Validate WIF templates against OCP release; exit 1 if validation fails (CHECK #3 or CHECK #4), exit 0 if validation passes
+5. Validate WIF templates against OCP release using **per-file comparison** (aggregates all permission changes across individual CRs, not just globally-new permissions); exit 1 if validation fails (CHECK #3 or CHECK #4), exit 0 if validation passes
 
 ## Script Usage
 

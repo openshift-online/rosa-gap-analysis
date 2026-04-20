@@ -39,8 +39,19 @@ def get_latest_ga_version():
     return versions[-1]
 
 
-def get_latest_stable_version():
-    """Get the latest stable OpenShift version from stable stream."""
+def get_latest_stable_version(ga_version=None):
+    """
+    Get the latest stable OpenShift version from stable stream, filtered by GA version line.
+
+    Args:
+        ga_version: GA version line to filter by (e.g., "4.21"). If None, auto-detects from Sippy.
+
+    Returns:
+        Latest stable version matching the GA line (e.g., "4.21.7")
+    """
+    if ga_version is None:
+        ga_version = get_latest_ga_version()
+
     try:
         url = f"{RELEASE_STREAM_BASE}/{STABLE_STREAM}/tags"
         req = Request(url, headers={'User-Agent': 'gap-analysis-script'})
@@ -50,26 +61,73 @@ def get_latest_stable_version():
             if not tags:
                 log_error(f"No tags found in {STABLE_STREAM} stream")
                 sys.exit(1)
+
+            # Filter tags to only those matching GA version line (e.g., 4.21.x)
+            matching_tags = [tag for tag in tags if tag['name'].startswith(f"{ga_version}.")]
+
+            if not matching_tags:
+                log_error(f"No stable versions found matching GA version line {ga_version}.x")
+                sys.exit(1)
+
             # Tags are sorted by date, first is most recent
-            return tags[0]['name']
+            return matching_tags[0]['name']
     except (URLError, json.JSONDecodeError, KeyError) as e:
         log_error(f"Failed to fetch latest stable version: {e}")
         sys.exit(1)
 
 
-def get_latest_candidate_version():
-    """Get the latest candidate OpenShift version from dev-preview stream."""
+def get_latest_candidate_version(dev_version=None):
+    """
+    Get the latest candidate OpenShift version using dual-source priority.
+
+    Priority 1: Check 4-stable for RC version (e.g., 4.22.0-rc.*)
+    Priority 2: Fall back to 4-dev-preview for EC version (e.g., 4.22.0-ec.*)
+
+    Args:
+        dev_version: Dev version line to search for (e.g., "4.22"). If None, auto-calculates from GA+1.
+
+    Returns:
+        Latest candidate version (RC from 4-stable or EC from 4-dev-preview)
+    """
+    if dev_version is None:
+        ga_version = get_latest_ga_version()
+        parts = ga_version.split('.')
+        dev_minor = int(parts[1]) + 1
+        dev_version = f"{parts[0]}.{dev_minor}"
+
     try:
-        url = f"{RELEASE_STREAM_BASE}/{DEV_PREVIEW_STREAM}/tags"
-        req = Request(url, headers={'User-Agent': 'gap-analysis-script'})
+        # Priority 1: Check 4-stable for RC version (e.g., 4.22.0-rc.*)
+        stable_url = f"{RELEASE_STREAM_BASE}/{STABLE_STREAM}/tags"
+        req = Request(stable_url, headers={'User-Agent': 'gap-analysis-script'})
         with urlopen(req, timeout=10) as response:
             data = json.loads(response.read())
             tags = data.get('tags', [])
-            if not tags:
-                log_error(f"No tags found in {DEV_PREVIEW_STREAM} stream")
-                sys.exit(1)
-            # Tags are sorted by date, first is most recent
-            return tags[0]['name']
+
+            # Filter for RC versions matching dev version line
+            rc_tags = [tag for tag in tags if tag['name'].startswith(f"{dev_version}.0-rc.")]
+
+            if rc_tags:
+                # Found RC in 4-stable, return it
+                return rc_tags[0]['name']
+
+        # Priority 2: No RC in 4-stable, check 4-dev-preview for EC version
+        dev_url = f"{RELEASE_STREAM_BASE}/{DEV_PREVIEW_STREAM}/tags"
+        req = Request(dev_url, headers={'User-Agent': 'gap-analysis-script'})
+        with urlopen(req, timeout=10) as response:
+            data = json.loads(response.read())
+            tags = data.get('tags', [])
+
+            # Filter for EC versions matching dev version line
+            ec_tags = [tag for tag in tags if tag['name'].startswith(f"{dev_version}.0-ec.")]
+
+            if ec_tags:
+                # Found EC in 4-dev-preview, return it
+                return ec_tags[0]['name']
+
+        # No RC or EC found
+        log_error(f"No candidate version found for {dev_version} (checked RC in 4-stable and EC in 4-dev-preview)")
+        sys.exit(1)
+
     except (URLError, json.JSONDecodeError, KeyError) as e:
         log_error(f"Failed to fetch latest candidate version: {e}")
         sys.exit(1)
@@ -112,6 +170,9 @@ def resolve_baseline_version(cli_arg=None, env_var=None):
     """
     Resolve baseline version with precedence: CLI > ENV > Auto-detect.
 
+    If CLI/ENV value is a minor version (e.g., "4.21"), it will be resolved to the
+    latest patch version from 4-stable stream (e.g., "4.21.7").
+
     Args:
         cli_arg: Version from CLI argument (--baseline)
         env_var: Version from environment variable (BASE_VERSION)
@@ -120,11 +181,25 @@ def resolve_baseline_version(cli_arg=None, env_var=None):
         str: Resolved version string
     """
     if cli_arg:
-        log_info(f"Using baseline version from CLI: {cli_arg}")
-        return cli_arg
+        # Check if this is a minor version (X.Y format) that needs resolution
+        if cli_arg.count('.') == 1:
+            log_info(f"Resolving baseline minor version from CLI: {cli_arg}")
+            version = get_latest_stable_version(ga_version=cli_arg)
+            log_info(f"Resolved to: {version}")
+            return version
+        else:
+            log_info(f"Using baseline version from CLI: {cli_arg}")
+            return cli_arg
     elif env_var:
-        log_info(f"Using baseline version from BASE_VERSION env: {env_var}")
-        return env_var
+        # Check if this is a minor version (X.Y format) that needs resolution
+        if env_var.count('.') == 1:
+            log_info(f"Resolving baseline minor version from BASE_VERSION env: {env_var}")
+            version = get_latest_stable_version(ga_version=env_var)
+            log_info(f"Resolved to: {version}")
+            return version
+        else:
+            log_info(f"Using baseline version from BASE_VERSION env: {env_var}")
+            return env_var
     else:
         log_info("Auto-detecting baseline version from latest stable...")
         version = get_latest_stable_version()
@@ -136,6 +211,11 @@ def resolve_target_version(cli_arg=None, env_var=None):
     """
     Resolve target version with precedence: CLI > ENV > Auto-detect.
 
+    If CLI/ENV value is a minor version (e.g., "4.22"), it will be resolved to the
+    latest candidate (RC from 4-stable or EC from 4-dev-preview).
+
+    Special keywords: NIGHTLY, CANDIDATE
+
     Args:
         cli_arg: Version from CLI argument (--target)
         env_var: Version from environment variable (TARGET_VERSION)
@@ -144,8 +224,15 @@ def resolve_target_version(cli_arg=None, env_var=None):
         str: Resolved version string
     """
     if cli_arg:
-        log_info(f"Using target version from CLI: {cli_arg}")
-        return cli_arg
+        # Check if this is a minor version (X.Y format) that needs resolution
+        if cli_arg.count('.') == 1:
+            log_info(f"Resolving target minor version from CLI: {cli_arg}")
+            version = get_latest_candidate_version(dev_version=cli_arg)
+            log_info(f"Resolved to: {version}")
+            return version
+        else:
+            log_info(f"Using target version from CLI: {cli_arg}")
+            return cli_arg
     elif env_var:
         # Check if TARGET_VERSION is a special keyword
         if env_var.upper() == 'NIGHTLY':
@@ -157,6 +244,12 @@ def resolve_target_version(cli_arg=None, env_var=None):
             log_info("TARGET_VERSION=CANDIDATE detected, using latest candidate...")
             version = get_latest_candidate_version()
             log_info(f"Auto-detected candidate target version: {version}")
+            return version
+        # Check if this is a minor version (X.Y format) that needs resolution
+        elif env_var.count('.') == 1:
+            log_info(f"Resolving target minor version from TARGET_VERSION env: {env_var}")
+            version = get_latest_candidate_version(dev_version=env_var)
+            log_info(f"Resolved to: {version}")
             return version
         else:
             log_info(f"Using target version from TARGET_VERSION env: {env_var}")

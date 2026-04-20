@@ -176,39 +176,56 @@ get_latest_dev_version() {
     fi
 }
 
-# Get the latest candidate (RC) version from dev-preview stream
-# Ensures candidate belongs to dev version (GA+1)
+# Get the latest candidate (RC or EC) version for GA+1
+# First checks 4-stable for RC version, falls back to 4-dev-preview for EC version
 # Usage: get_latest_candidate_version
-# Returns: Latest candidate version (e.g., "4.22.0-rc.1") or empty string on failure
+# Returns: Latest candidate version (e.g., "4.22.0-rc.1" or "4.22.0-ec.3") or empty string on failure
 # Exit: 0 on success, 1 on failure
 get_latest_candidate_version() {
-    local api_url
+    local ga_version
     local dev_version
     local latest_candidate
+    local stable_api_url
+    local dev_api_url
 
-    # Get dev version first to validate against
-    dev_version=$(get_latest_dev_version) || return 1
+    # Get GA version first
+    ga_version=$(get_latest_ga_version) || return 1
 
-    # Build API URL for dev-preview stream (amd64)
-    api_url="${RELEASE_STREAM_BASE}/${DEV_PREVIEW_STREAM}/tags"
+    # Calculate dev version (GA + 1)
+    local ga_minor
+    ga_minor=$(echo "$ga_version" | cut -d. -f2)
+    local dev_minor=$((ga_minor + 1))
+    dev_version="4.${dev_minor}"
 
-    # Fetch tags and get the latest one
-    # Tags are returned in chronological order, so we take the first one (most recent)
-    latest_candidate=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r '.tags[0].name' 2>/dev/null)
+    # Step 1: Check 4-stable stream for RC version (e.g., 4.22.0-rc.*)
+    stable_api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
+    latest_candidate=$(curl -s --fail "$stable_api_url" 2>/dev/null | \
+        jq -r --arg dev "$dev_version" '.tags[] | select(.name | startswith($dev + ".0-rc.")) | .name' 2>/dev/null | head -1)
+
+    if [[ -n "$latest_candidate" ]] && [[ "$latest_candidate" != "null" ]]; then
+        if command -v log_info &>/dev/null; then
+            log_info "Found RC version in ${STABLE_STREAM}: $latest_candidate"
+        fi
+        echo "$latest_candidate"
+        return 0
+    fi
+
+    # Step 2: No RC in stable, check 4-dev-preview stream for EC version (e.g., 4.22.0-ec.*)
+    dev_api_url="${RELEASE_STREAM_BASE}/${DEV_PREVIEW_STREAM}/tags"
+    latest_candidate=$(curl -s --fail "$dev_api_url" 2>/dev/null | \
+        jq -r --arg dev "$dev_version" '.tags[] | select(.name | startswith($dev + ".0-ec.")) | .name' 2>/dev/null | head -1)
 
     if [[ -z "$latest_candidate" ]] || [[ "$latest_candidate" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest candidate version from ${DEV_PREVIEW_STREAM} stream"
+            log_error "Failed to fetch candidate version for ${dev_version}.x (no RC in ${STABLE_STREAM}, no EC in ${DEV_PREVIEW_STREAM})"
         else
-            echo "Error: Failed to fetch latest candidate version from ${DEV_PREVIEW_STREAM} stream" >&2
+            echo "Error: Failed to fetch candidate version for ${dev_version}.x" >&2
         fi
         return 1
     fi
 
-    # Validate that candidate belongs to dev version
-    if ! validate_candidate_belongs_to_version "$latest_candidate" "$dev_version"; then
-        return 1
+    if command -v log_info &>/dev/null; then
+        log_info "Found EC version in ${DEV_PREVIEW_STREAM}: $latest_candidate"
     fi
 
     echo "$latest_candidate"
@@ -225,27 +242,27 @@ get_latest_stable_version() {
     local ga_version
     local latest_stable
 
-    # Get GA version first to validate against
+    # Get GA version first (e.g., "4.21")
     ga_version=$(get_latest_ga_version) || return 1
 
     # Build API URL for stable stream (amd64)
     api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
 
-    # Fetch tags and get the latest one
-    # Tags are returned in chronological order, so we take the first one (most recent)
+    # Fetch tags and filter to only those matching GA version line (e.g., 4.21.x)
+    # Tags are returned in chronological order, so we take the first matching one (most recent)
     latest_stable=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r '.tags[0].name' 2>/dev/null)
+        jq -r --arg ga "$ga_version" '.tags[] | select(.name | startswith($ga + ".")) | .name' 2>/dev/null | head -1)
 
     if [[ -z "$latest_stable" ]] || [[ "$latest_stable" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest stable version from ${STABLE_STREAM} stream"
+            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream"
         else
-            echo "Error: Failed to fetch latest stable version from ${STABLE_STREAM} stream" >&2
+            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream" >&2
         fi
         return 1
     fi
 
-    # Validate that stable belongs to GA version
+    # Validate that stable belongs to GA version (should always pass now due to filter)
     if ! validate_stable_belongs_to_version "$latest_stable" "$ga_version"; then
         return 1
     fi
@@ -265,33 +282,34 @@ get_latest_stable_pullspec() {
     local stable_version
     local pullspec
 
-    # Get GA version first to validate against
+    # Get GA version first (e.g., "4.21")
     ga_version=$(get_latest_ga_version) || return 1
 
     # Build API URL for stable stream (amd64)
     api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
 
-    # Fetch tags and get the latest one's pullspec
-    stable_version=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r '.tags[0].name' 2>/dev/null)
+    # Fetch tags and filter to only those matching GA version line (e.g., 4.21.x)
+    # Get both name and pullspec for the first matching tag
+    local result
+    result=$(curl -s --fail "$api_url" 2>/dev/null | \
+        jq -r --arg ga "$ga_version" '.tags[] | select(.name | startswith($ga + ".")) | {name: .name, pullSpec: .pullSpec} | @json' 2>/dev/null | head -1)
 
-    if [[ -z "$stable_version" ]] || [[ "$stable_version" == "null" ]]; then
+    if [[ -z "$result" ]] || [[ "$result" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest stable version from ${STABLE_STREAM} stream"
+            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream"
         else
-            echo "Error: Failed to fetch latest stable version from ${STABLE_STREAM} stream" >&2
+            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream" >&2
         fi
         return 1
     fi
 
-    # Validate that stable belongs to GA version
+    stable_version=$(echo "$result" | jq -r '.name')
+    pullspec=$(echo "$result" | jq -r '.pullSpec')
+
+    # Validate that stable belongs to GA version (should always pass now due to filter)
     if ! validate_stable_belongs_to_version "$stable_version" "$ga_version"; then
         return 1
     fi
-
-    # Get the pullspec
-    pullspec=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r '.tags[0].pullSpec' 2>/dev/null)
 
     if [[ -z "$pullspec" ]] || [[ "$pullspec" == "null" ]]; then
         if command -v log_error &>/dev/null; then
@@ -306,44 +324,65 @@ get_latest_stable_pullspec() {
     return 0
 }
 
-# Get the latest candidate version pullspec from dev-preview stream
-# Ensures candidate belongs to dev version (GA+1)
+# Get the latest candidate (RC or EC) version pullspec
+# First checks 4-stable for RC, falls back to 4-dev-preview for EC
 # Usage: get_latest_candidate_pullspec
-# Returns: Pullspec for latest candidate version (e.g., "registry.ci.openshift.org/ocp/release:4.22.0-ec.3")
+# Returns: Pullspec for latest candidate version (e.g., "quay.io/openshift-release-dev/ocp-release:4.22.0-rc.1-x86_64" or "registry.ci.openshift.org/ocp/release:4.22.0-ec.3")
 # Exit: 0 on success, 1 on failure
 get_latest_candidate_pullspec() {
-    local api_url
+    local ga_version
     local dev_version
     local candidate_version
     local pullspec
+    local stable_api_url
+    local dev_api_url
 
-    # Get dev version first to validate against
-    dev_version=$(get_latest_dev_version) || return 1
+    # Get GA version first
+    ga_version=$(get_latest_ga_version) || return 1
 
-    # Build API URL for dev-preview stream (amd64)
-    api_url="${RELEASE_STREAM_BASE}/${DEV_PREVIEW_STREAM}/tags"
+    # Calculate dev version (GA + 1)
+    local ga_minor
+    ga_minor=$(echo "$ga_version" | cut -d. -f2)
+    local dev_minor=$((ga_minor + 1))
+    dev_version="4.${dev_minor}"
 
-    # Fetch tags and get the latest one's name
-    candidate_version=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r '.tags[0].name' 2>/dev/null)
+    # Step 1: Check 4-stable stream for RC version
+    stable_api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
 
-    if [[ -z "$candidate_version" ]] || [[ "$candidate_version" == "null" ]]; then
+    # Get candidate version and pullspec from stable stream
+    local stable_result
+    stable_result=$(curl -s --fail "$stable_api_url" 2>/dev/null | \
+        jq -r --arg dev "$dev_version" '.tags[] | select(.name | startswith($dev + ".0-rc.")) | {name: .name, pullSpec: .pullSpec} | @json' 2>/dev/null | head -1)
+
+    if [[ -n "$stable_result" ]] && [[ "$stable_result" != "null" ]]; then
+        candidate_version=$(echo "$stable_result" | jq -r '.name')
+        pullspec=$(echo "$stable_result" | jq -r '.pullSpec')
+
+        if [[ -n "$pullspec" ]] && [[ "$pullspec" != "null" ]]; then
+            echo "$pullspec"
+            return 0
+        fi
+    fi
+
+    # Step 2: No RC in stable, check 4-dev-preview stream for EC version
+    dev_api_url="${RELEASE_STREAM_BASE}/${DEV_PREVIEW_STREAM}/tags"
+
+    # Get candidate version and pullspec from dev-preview stream
+    local dev_result
+    dev_result=$(curl -s --fail "$dev_api_url" 2>/dev/null | \
+        jq -r --arg dev "$dev_version" '.tags[] | select(.name | startswith($dev + ".0-ec.")) | {name: .name, pullSpec: .pullSpec} | @json' 2>/dev/null | head -1)
+
+    if [[ -z "$dev_result" ]] || [[ "$dev_result" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest candidate version from ${DEV_PREVIEW_STREAM} stream"
+            log_error "Failed to fetch candidate pullspec for ${dev_version}.x"
         else
-            echo "Error: Failed to fetch latest candidate version from ${DEV_PREVIEW_STREAM} stream" >&2
+            echo "Error: Failed to fetch candidate pullspec for ${dev_version}.x" >&2
         fi
         return 1
     fi
 
-    # Validate that candidate belongs to dev version
-    if ! validate_candidate_belongs_to_version "$candidate_version" "$dev_version"; then
-        return 1
-    fi
-
-    # Get the pullspec
-    pullspec=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r '.tags[0].pullSpec' 2>/dev/null)
+    candidate_version=$(echo "$dev_result" | jq -r '.name')
+    pullspec=$(echo "$dev_result" | jq -r '.pullSpec')
 
     if [[ -z "$pullspec" ]] || [[ "$pullspec" == "null" ]]; then
         if command -v log_error &>/dev/null; then
@@ -510,20 +549,20 @@ Commands:
   --help, -h                       Show this help
 
 Examples:
-  $0 --latest-ga                      # Output: 4.21
+  $0 --latest-ga                      # Output: 4.21 (from Sippy API)
   $0 --latest-dev                     # Output: 4.22 (always GA+1)
-  $0 --latest-stable                  # Output: 4.21.6 (latest stable for GA version)
-  $0 --latest-stable-pullspec         # Output: quay.io/openshift-release-dev/ocp-release:4.21.6-x86_64
-  $0 --latest-candidate               # Output: 4.22.0-ec.3 (latest candidate for dev version)
-  $0 --latest-candidate-pullspec      # Output: registry.ci.openshift.org/ocp/release:4.22.0-ec.3
+  $0 --latest-stable                  # Output: 4.21.11 (latest 4.21.x from 4-stable, filtered by GA)
+  $0 --latest-stable-pullspec         # Output: quay.io/openshift-release-dev/ocp-release:4.21.11-x86_64
+  $0 --latest-candidate               # Output: 4.22.0-rc.0 or 4.22.0-ec.5 (RC from 4-stable, or EC from 4-dev-preview)
+  $0 --latest-candidate-pullspec      # Output: quay.io/.../4.22.0-rc.0-x86_64 or registry.ci.../4.22.0-ec.5
   $0 --latest-nightly                 # Output: 4.22.0-0.nightly-2026-03-13-184504 (dev version)
   $0 --latest-nightly-pullspec        # Output: registry.ci.openshift.org/ocp/release:4.22.0-0.nightly...
   $0 --nightly 4.22                   # Output: registry.ci.openshift.org/ocp/release:4.22...
 
 Notes:
   - Dev version is always exactly 1 minor version ahead of GA (e.g., GA=4.21, Dev=4.22)
-  - Stable versions always belong to the GA version (e.g., 4.21.6 for GA 4.21)
-  - Candidate versions always belong to the dev version (e.g., 4.22.0-ec.3 for dev 4.22)
+  - Stable versions are filtered from 4-stable stream for GA version line only (e.g., 4.21.x for GA 4.21)
+  - Candidate versions: first checks 4-stable for RC (e.g., 4.22.0-rc.*), falls back to 4-dev-preview for EC (e.g., 4.22.0-ec.*)
   - All validation is performed automatically when fetching versions
 
 Can also be sourced in other scripts:

@@ -32,7 +32,7 @@ Trigger this skill when:
 1. **Extracts credential requests** from OpenShift release payloads using `oc adm release extract`
 2. **Converts CredentialsRequest manifests** to consolidated IAM policy JSON documents
 3. **Compares IAM permissions** at action-level and service-level to identify changes
-4. **Validates policy files** against OCP release credential requests; exits 1 if validation fails (CHECK #1 or #2) or on execution failures
+4. **Validates policy files** against OCP release credential requests using **per-file comparison** (aggregates all permission changes across individual CRs, not just globally-new permissions); exits 1 if validation fails (CHECK #1 or #2) or on execution failures
 
 ## Workflow
 

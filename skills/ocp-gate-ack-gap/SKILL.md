@@ -29,8 +29,10 @@ Verify that admin gates from the baseline OpenShift version are properly acknowl
 1. Parse baseline and target versions (default: auto-detect latest stable → latest candidate)
 2. Fetch admin gate ConfigMap from cluster-version-operator repo (baseline version)
 3. Check if admin gates exist in the ConfigMap's `data` field
-4. If gates exist, fetch admin acknowledgment ConfigMap from managed-cluster-config repo (target version)
-5. Validate that all gates are properly acknowledged
+4. Fetch admin acknowledgment ConfigMap from managed-cluster-config repo (target version)
+5. Validate acknowledgment structure based on gate presence:
+   - **If gates exist**: Both `config.yaml` AND `admin-ack.yaml` MUST be present, all gates must be acknowledged
+   - **If no gates**: Both files MUST be absent (directory should not exist)
 6. Report upgrade readiness status and generate detailed reports
 
 ## Script Usage
@@ -92,19 +94,36 @@ reports/gap-analysis-ocp-gate-ack_4.21_to_4.22_20260327_120000.json  # JSON
 ## Key Validation Checks
 
 1. **Admin Gates Existence**: Checks baseline version for admin gates
-2. **Acknowledgment File**: Verifies target version has acknowledgment file
-3. **Gate Acknowledgments**: Ensures all baseline gates are acknowledged in target
-4. **Extra Acknowledgments**: Reports any extra acknowledgments (informational)
+2. **Acknowledgment Structure** (conditional):
+   - **If gates exist**: Both `config.yaml` AND `admin-ack.yaml` must be present
+   - **If no gates**: Both files must be absent
+3. **Gate Acknowledgments**: When gates exist, ensures all baseline gates are acknowledged in target
+4. **Config Validation**: When files exist, validates `config.yaml` has correct baseline version
+5. **Extra Acknowledgments**: Reports any extra acknowledgments (informational)
 
 ## Upgrade Readiness States
 
 ### ✅ UPGRADE READY
-- No admin gates in baseline version, OR
-- All admin gates are properly acknowledged in target version
+**Scenario 1: No gates in baseline**
+- No admin gates exist in baseline version
+- Both `config.yaml` and `admin-ack.yaml` are absent in target directory
+- Acknowledgment directory correctly does not exist
+
+**Scenario 2: Gates exist and acknowledged**
+- Admin gates exist in baseline version
+- Both `config.yaml` and `admin-ack.yaml` are present in target directory
+- All admin gates are properly acknowledged in `admin-ack.yaml`
+- `config.yaml` has correct baseline version reference
 
 ### ❌ UPGRADE NOT READY (Blocked)
-- **Missing Acknowledgment File**: `deploy/osd-cluster-acks/ocp/{version}/admin-ack.yaml` not found
+**Structure validation failures:**
+- **Gates exist but files missing**: Gates in baseline but `config.yaml` or `admin-ack.yaml` missing
+- **No gates but files present**: No gates in baseline but `config.yaml` or `admin-ack.yaml` exist
+- **Partial structure**: Only one file present (both must be present together or absent together)
+
+**Content validation failures:**
 - **Unacknowledged Gates**: One or more gates exist in baseline but not acknowledged in target
+- **Invalid config.yaml**: Baseline version mismatch or structural errors
 
 ## Output
 

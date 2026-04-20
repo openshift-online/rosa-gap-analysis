@@ -91,11 +91,11 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 
 | Check # | Script | Validates | Exit on FAIL |
 |---------|--------|-----------|--------------|
-| **1** | gap-aws-sts.py | AWS STS policy files in `resources/sts/{version}/` match OCP release | Yes |
+| **1** | gap-aws-sts.py | AWS STS policy files in `resources/sts/{version}/` match OCP release (per-file comparison) | Yes |
 | **2** | gap-aws-sts.py | AWS acknowledgment files in `deploy/osd-cluster-acks/sts/{version}/` | Yes |
-| **3** | gap-gcp-wif.py | GCP WIF templates in `resources/wif/{version}/` match OCP release | Yes |
+| **3** | gap-gcp-wif.py | GCP WIF templates in `resources/wif/{version}/` match OCP release (per-file comparison) | Yes |
 | **4** | gap-gcp-wif.py | GCP acknowledgment files in `deploy/osd-cluster-acks/wif/{version}/` | Yes |
-| **5** | gap-ocp-gate-ack.py | OCP admin gate acknowledgments in `deploy/osd-cluster-acks/ocp/{version}/` | Yes |
+| **5** | gap-ocp-gate-ack.py | OCP admin gate acknowledgments in `deploy/osd-cluster-acks/ocp/{version}/` (conditional: if gates exist, both config.yaml + admin-ack.yaml required; if no gates, both files must be absent) | Yes |
 | **6** | gap-feature-gates.py | Feature gate changes (informational) | No |
 
 **Expected baseline**: For target X.Y, baseline is X.(Y-1). Example: 4.22 expects 4.21 baseline.
@@ -107,14 +107,18 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 - Feature gates runs last, aggregates reports via `generate-combined-report.py`, exits 1 on failures
 
 **Version resolution (openshift_releases.py/sh):**
-- Auto-detect: queries Sippy API for latest stable (baseline) and candidate (target)
-- Keywords: `NIGHTLY` → latest dev nightly, `CANDIDATE` → latest dev candidate
+- **Baseline**: Latest GA version line (e.g., 4.21.x) from 4-stable stream, filtered by GA version from Sippy API
+- **Target**: GA+1 version (e.g., 4.22.x) - first checks 4-stable for RC (4.22.0-rc.*), falls back to 4-dev-preview for EC (4.22.0-ec.*)
+- **CLI/ENV resolution**: Minor versions (e.g., `--baseline 4.21 --target 4.22`) are resolved the same way as auto-detect (4.21 → 4.21.11, 4.22 → 4.22.0-rc.0); full versions (e.g., `4.21.7`, `4.22.0-rc.0`) are used as-is
+- Auto-detect: queries Sippy API for GA version (e.g., 4.21), then filters release streams
+- Keywords: `NIGHTLY` → latest dev nightly, `CANDIDATE` → latest dev candidate (RC from stable or EC from dev-preview)
 - Minor version normalization: `4.21.7` → `4.21` for feature gates API
 
 **Validation (ack_validation.py):**
 - Fetches files from managed-cluster-config GitHub repo via HTTPS
 - Uses git sparse-checkout for efficient directory fetching
-- Validates policy files match OCP release credential requests
+- Validates policy files match OCP release credential requests using **per-file comparison**
+- Per-file validation: Aggregates all permission changes across individual CredentialRequest files, not just globally-new permissions (a permission can be new to one CR but already exist in another)
 - Checks acknowledgment files (config.yaml, cloudcredential.yaml) for required structure
 
 **Report generation (reporters.py):**

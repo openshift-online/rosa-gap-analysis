@@ -8,11 +8,11 @@ All scripts use a consistent global check numbering system:
 
 | Check # | Category | Description | Pass/Fail Impact |
 |---------|----------|-------------|------------------|
-| **1** | AWS STS Resources | Validates STS policy files exist in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `resources/sts/{version}/` and match OCP release changes | Exit code 1 on FAIL |
+| **1** | AWS STS Resources | Validates STS policy files exist in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `resources/sts/{version}/` and match OCP release changes (per-file comparison) | Exit code 1 on FAIL |
 | **2** | AWS STS Admin Ack | Validates admin acknowledgment files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `deploy/osd-cluster-acks/sts/{version}/` | Exit code 1 on FAIL |
-| **3** | GCP WIF Resources | Validates WIF template (vanilla.yaml) in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `resources/wif/{version}/` and matches OCP release changes | Exit code 1 on FAIL |
+| **3** | GCP WIF Resources | Validates WIF template (vanilla.yaml) in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `resources/wif/{version}/` and matches OCP release changes (per-file comparison) | Exit code 1 on FAIL |
 | **4** | GCP WIF Admin Ack | Validates admin acknowledgment files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `deploy/osd-cluster-acks/wif/{version}/` | Exit code 1 on FAIL |
-| **5** | OCP Admin Gates | Validates admin gates from cluster-version-operator are acknowledged in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `deploy/osd-cluster-acks/ocp/{version}/` | Exit code 1 on FAIL |
+| **5** | OCP Admin Gates | Validates admin gates from cluster-version-operator are acknowledged in [managed-cluster-config](https://github.com/openshift/managed-cluster-config) `deploy/osd-cluster-acks/ocp/{version}/` (conditional: if gates exist, both files required; if no gates, both files must be absent) | Exit code 1 on FAIL |
 | **6** | Feature Gates | Analyzes feature gate changes from Sippy API (informational only) | Always PASS (exit code 0) |
 
 ## Check Execution by Script
@@ -73,9 +73,10 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 **What it validates:**
 - Target version directory exists: `resources/sts/{version}/`
 - All policy files are valid JSON with required structure
-- Policy changes match OCP release credential request changes
+- Policy changes match OCP release credential request changes using **per-file comparison**
+- Per-file comparison aggregates all permission changes across individual CredentialRequest files (a permission can be new to one CR but already exist in another)
 - No unexpected files added or removed
-- Actions (permissions) in managed-cluster-config match OCP release
+- Actions (permissions) in managed-cluster-config match OCP release per-file changes
 
 **Files checked:**
 - All JSON files dynamically discovered in `resources/sts/{version}/`
@@ -109,7 +110,8 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 - Target version directory exists: `resources/wif/{version}/`
 - `vanilla.yaml` exists and is valid
 - WIF template has correct structure (id, kind, service_accounts)
-- GCP permissions in template match OCP release changes
+- GCP permissions in template match OCP release changes using **per-file comparison**
+- Per-file comparison aggregates all permission changes across individual CredentialRequest files (a permission can be new to one CR but already exist in another)
 
 **Files checked:**
 - `resources/wif/{version}/vanilla.yaml`
@@ -140,9 +142,14 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 
 **What it validates:**
 - Admin gates from baseline version are acknowledged in target version
-- Acknowledgment ConfigMap exists if gates are present
-- All required gates are acknowledged
-- `config.yaml` has correct baseline version
+- Acknowledgment structure follows conditional presence rules
+- All required gates are acknowledged when gates exist
+- `config.yaml` and `admin-ack.yaml` are present together or absent together
+
+**Conditional validation logic:**
+- **If gates exist in baseline**: BOTH `config.yaml` AND `admin-ack.yaml` MUST be present in target, all gates must be acknowledged
+- **If no gates in baseline**: BOTH files MUST be absent (directory should not exist)
+- Files must always be present together or absent together
 
 **Files checked:**
 - Admin gates from: `github.com/openshift/cluster-version-operator/release-{version}/...`
@@ -150,9 +157,8 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 - Config from: `deploy/osd-cluster-acks/ocp/{version}/config.yaml`
 
 **Pass criteria:**
-- If no admin gates in baseline: PASS (no acks required)
-- If admin gates exist: All gates must be acknowledged
-- config.yaml must be valid with correct baseline version
+- **No gates scenario**: Both `config.yaml` and `admin-ack.yaml` are absent
+- **Gates exist scenario**: Both files present, all gates acknowledged, config.yaml has correct baseline version
 
 ### Check 6: Feature Gates
 

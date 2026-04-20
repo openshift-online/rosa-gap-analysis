@@ -28,3 +28,15 @@ ci/artifacts/
 
 # GitHub PR configuration (contains bot settings)
 .github-pr-config
+
+# === Additional patterns for agent-readiness ===
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db

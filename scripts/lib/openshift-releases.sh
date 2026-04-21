@@ -10,9 +10,14 @@ fi
 
 # API endpoints
 readonly SIPPY_API="https://sippy.dptools.openshift.org/api/releases"
+readonly ACCEPTED_STREAMS_API="https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted"
+# RELEASE_STREAM_BASE still needed for pullspec/nightly functions (accepted API doesn't provide pullspecs)
 readonly RELEASE_STREAM_BASE="https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestream"
-readonly DEV_PREVIEW_STREAM="4-dev-preview"
 readonly STABLE_STREAM="4-stable"
+readonly DEV_PREVIEW_STREAM="4-dev-preview"
+
+# Cache for accepted streams (to avoid multiple API calls)
+_ACCEPTED_STREAMS_CACHE=""
 
 # Helper function to extract minor version number from version string
 # Usage: extract_minor_version "4.21"
@@ -129,6 +134,33 @@ get_latest_ga_version() {
     return 0
 }
 
+# Fetch all accepted release streams (cached to avoid multiple API calls)
+# Usage: fetch_accepted_streams
+# Returns: JSON object with accepted streams: {"4-stable": [...], "4-dev-preview": [...]}
+# Exit: 0 on success, 1 on failure
+fetch_accepted_streams() {
+    # Return cached value if available
+    if [[ -n "$_ACCEPTED_STREAMS_CACHE" ]]; then
+        echo "$_ACCEPTED_STREAMS_CACHE"
+        return 0
+    fi
+
+    # Fetch and cache the accepted streams
+    _ACCEPTED_STREAMS_CACHE=$(curl -s --fail "$ACCEPTED_STREAMS_API" 2>/dev/null)
+
+    if [[ -z "$_ACCEPTED_STREAMS_CACHE" ]] || [[ "$_ACCEPTED_STREAMS_CACHE" == "null" ]]; then
+        if command -v log_error &>/dev/null; then
+            log_error "Failed to fetch accepted release streams"
+        else
+            echo "Error: Failed to fetch accepted release streams" >&2
+        fi
+        return 1
+    fi
+
+    echo "$_ACCEPTED_STREAMS_CACHE"
+    return 0
+}
+
 # Get the latest development version (not yet GA)
 # Ensures dev version is exactly 1 minor version ahead of GA
 # Usage: get_latest_dev_version
@@ -176,17 +208,16 @@ get_latest_dev_version() {
     fi
 }
 
-# Get the latest candidate (RC or EC) version for GA+1
+# Get the latest candidate (RC or EC) version for GA+1 from accepted streams
 # First checks 4-stable for RC version, falls back to 4-dev-preview for EC version
 # Usage: get_latest_candidate_version
-# Returns: Latest candidate version (e.g., "4.22.0-rc.1" or "4.22.0-ec.3") or empty string on failure
+# Returns: Latest candidate version (e.g., "4.22.0-rc.0" or "4.22.0-ec.5") or empty string on failure
 # Exit: 0 on success, 1 on failure
 get_latest_candidate_version() {
     local ga_version
     local dev_version
+    local streams
     local latest_candidate
-    local stable_api_url
-    local dev_api_url
 
     # Get GA version first
     ga_version=$(get_latest_ga_version) || return 1
@@ -197,10 +228,13 @@ get_latest_candidate_version() {
     local dev_minor=$((ga_minor + 1))
     dev_version="4.${dev_minor}"
 
-    # Step 1: Check 4-stable stream for RC version (e.g., 4.22.0-rc.*)
-    stable_api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
-    latest_candidate=$(curl -s --fail "$stable_api_url" 2>/dev/null | \
-        jq -r --arg dev "$dev_version" '.tags[] | select(.name | startswith($dev + ".0-rc.")) | .name' 2>/dev/null | head -1)
+    # Fetch accepted streams
+    streams=$(fetch_accepted_streams) || return 1
+
+    # Priority 1: Check 4-stable for RC version (e.g., 4.22.0-rc.*)
+    # Versions are already sorted newest first
+    latest_candidate=$(echo "$streams" | \
+        jq -r --arg stream "$STABLE_STREAM" --arg dev "$dev_version" '.[$stream][] | select(startswith($dev + ".0-rc."))' 2>/dev/null | head -1)
 
     if [[ -n "$latest_candidate" ]] && [[ "$latest_candidate" != "null" ]]; then
         if command -v log_info &>/dev/null; then
@@ -210,10 +244,9 @@ get_latest_candidate_version() {
         return 0
     fi
 
-    # Step 2: No RC in stable, check 4-dev-preview stream for EC version (e.g., 4.22.0-ec.*)
-    dev_api_url="${RELEASE_STREAM_BASE}/${DEV_PREVIEW_STREAM}/tags"
-    latest_candidate=$(curl -s --fail "$dev_api_url" 2>/dev/null | \
-        jq -r --arg dev "$dev_version" '.tags[] | select(.name | startswith($dev + ".0-ec.")) | .name' 2>/dev/null | head -1)
+    # Priority 2: No RC in stable, check 4-dev-preview for EC version (e.g., 4.22.0-ec.*)
+    latest_candidate=$(echo "$streams" | \
+        jq -r --arg stream "$DEV_PREVIEW_STREAM" --arg dev "$dev_version" '.[$stream][] | select(startswith($dev + ".0-ec."))' 2>/dev/null | head -1)
 
     if [[ -z "$latest_candidate" ]] || [[ "$latest_candidate" == "null" ]]; then
         if command -v log_error &>/dev/null; then
@@ -232,32 +265,32 @@ get_latest_candidate_version() {
     return 0
 }
 
-# Get the latest stable version from stable stream
+# Get the latest stable version from accepted streams
 # Ensures stable version belongs to GA version
 # Usage: get_latest_stable_version
-# Returns: Latest stable version (e.g., "4.21.6") or empty string on failure
+# Returns: Latest stable version (e.g., "4.21.11") or empty string on failure
 # Exit: 0 on success, 1 on failure
 get_latest_stable_version() {
-    local api_url
     local ga_version
+    local streams
     local latest_stable
 
     # Get GA version first (e.g., "4.21")
     ga_version=$(get_latest_ga_version) || return 1
 
-    # Build API URL for stable stream (amd64)
-    api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
+    # Fetch accepted streams
+    streams=$(fetch_accepted_streams) || return 1
 
-    # Fetch tags and filter to only those matching GA version line (e.g., 4.21.x)
-    # Tags are returned in chronological order, so we take the first matching one (most recent)
-    latest_stable=$(curl -s --fail "$api_url" 2>/dev/null | \
-        jq -r --arg ga "$ga_version" '.tags[] | select(.name | startswith($ga + ".")) | .name' 2>/dev/null | head -1)
+    # Extract 4-stable array and filter by GA version line (e.g., 4.21.x)
+    # Versions are already sorted newest first in the accepted API
+    latest_stable=$(echo "$streams" | \
+        jq -r --arg stream "$STABLE_STREAM" --arg ga "$ga_version" '.[$stream][] | select(startswith($ga + "."))' 2>/dev/null | head -1)
 
     if [[ -z "$latest_stable" ]] || [[ "$latest_stable" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream"
+            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} accepted stream"
         else
-            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream" >&2
+            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} accepted stream" >&2
         fi
         return 1
     fi

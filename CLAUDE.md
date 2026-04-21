@@ -107,12 +107,14 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 - Feature gates runs last, aggregates reports via `generate-combined-report.py`, exits 1 on failures
 
 **Version resolution (openshift_releases.py/sh):**
-- **Baseline**: Latest GA version line (e.g., 4.21.x) from 4-stable stream, filtered by GA version from Sippy API
+- **API endpoint**: Uses `/api/v1/releasestreams/accepted` (single call for both 4-stable and 4-dev-preview)
+- **Baseline**: Latest GA version line (e.g., 4.21.x) from 4-stable accepted stream, filtered by GA version from Sippy API
 - **Target**: GA+1 version (e.g., 4.22.x) - first checks 4-stable for RC (4.22.0-rc.*), falls back to 4-dev-preview for EC (4.22.0-ec.*)
 - **CLI/ENV resolution**: Minor versions (e.g., `--baseline 4.21 --target 4.22`) are resolved the same way as auto-detect (4.21 → 4.21.11, 4.22 → 4.22.0-rc.0); full versions (e.g., `4.21.7`, `4.22.0-rc.0`) are used as-is
-- Auto-detect: queries Sippy API for GA version (e.g., 4.21), then filters release streams
+- Auto-detect: queries Sippy API for GA version (e.g., 4.21), then filters accepted streams
 - Keywords: `NIGHTLY` → latest dev nightly, `CANDIDATE` → latest dev candidate (RC from stable or EC from dev-preview)
 - Minor version normalization: `4.21.7` → `4.21` for feature gates API
+- **Quick version queries**: See README.md Quick Reference for curl commands to query accepted streams
 
 **Validation (ack_validation.py):**
 - Fetches files from managed-cluster-config GitHub repo via HTTPS

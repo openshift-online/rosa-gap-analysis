@@ -19,6 +19,7 @@ __pycache__/
 
 # Reports
 reports/
+.agentready
 
 # CI artifacts (only used if user explicitly specifies --work-dir ./ci/artifacts)
 ci/artifacts/

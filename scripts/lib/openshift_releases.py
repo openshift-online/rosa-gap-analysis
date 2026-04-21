@@ -10,9 +10,9 @@ from common import log_info, log_error
 
 
 SIPPY_API = "https://sippy.dptools.openshift.org/api/releases"
-RELEASE_STREAM_BASE = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestream"
-DEV_PREVIEW_STREAM = "4-dev-preview"
+ACCEPTED_STREAMS_API = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted"
 STABLE_STREAM = "4-stable"
+DEV_PREVIEW_STREAM = "4-dev-preview"
 
 
 def fetch_sippy_ga_dates():
@@ -39,46 +39,57 @@ def get_latest_ga_version():
     return versions[-1]
 
 
+def fetch_accepted_streams():
+    """
+    Fetch all accepted release streams in a single API call.
+
+    Returns:
+        dict: {"4-stable": ["4.22.0-rc.0", "4.21.11", ...], "4-dev-preview": [...]}
+    """
+    try:
+        req = Request(ACCEPTED_STREAMS_API, headers={'User-Agent': 'gap-analysis-script'})
+        with urlopen(req, timeout=10) as response:
+            return json.loads(response.read())
+    except (URLError, json.JSONDecodeError) as e:
+        log_error(f"Failed to fetch accepted release streams: {e}")
+        sys.exit(1)
+
+
 def get_latest_stable_version(ga_version=None):
     """
-    Get the latest stable OpenShift version from stable stream, filtered by GA version line.
+    Get the latest stable OpenShift version from accepted streams, filtered by GA version line.
 
     Args:
         ga_version: GA version line to filter by (e.g., "4.21"). If None, auto-detects from Sippy.
 
     Returns:
-        Latest stable version matching the GA line (e.g., "4.21.7")
+        Latest stable version matching the GA line (e.g., "4.21.11")
     """
     if ga_version is None:
         ga_version = get_latest_ga_version()
 
-    try:
-        url = f"{RELEASE_STREAM_BASE}/{STABLE_STREAM}/tags"
-        req = Request(url, headers={'User-Agent': 'gap-analysis-script'})
-        with urlopen(req, timeout=10) as response:
-            data = json.loads(response.read())
-            tags = data.get('tags', [])
-            if not tags:
-                log_error(f"No tags found in {STABLE_STREAM} stream")
-                sys.exit(1)
+    # Fetch accepted streams (single API call)
+    streams = fetch_accepted_streams()
+    stable_versions = streams.get(STABLE_STREAM, [])
 
-            # Filter tags to only those matching GA version line (e.g., 4.21.x)
-            matching_tags = [tag for tag in tags if tag['name'].startswith(f"{ga_version}.")]
-
-            if not matching_tags:
-                log_error(f"No stable versions found matching GA version line {ga_version}.x")
-                sys.exit(1)
-
-            # Tags are sorted by date, first is most recent
-            return matching_tags[0]['name']
-    except (URLError, json.JSONDecodeError, KeyError) as e:
-        log_error(f"Failed to fetch latest stable version: {e}")
+    if not stable_versions:
+        log_error(f"No versions found in {STABLE_STREAM} accepted stream")
         sys.exit(1)
+
+    # Filter to match GA version line (e.g., 4.21.x)
+    # Versions are already sorted newest first in the accepted API
+    matching_versions = [v for v in stable_versions if v.startswith(f"{ga_version}.")]
+
+    if not matching_versions:
+        log_error(f"No stable versions found matching GA version line {ga_version}.x")
+        sys.exit(1)
+
+    return matching_versions[0]
 
 
 def get_latest_candidate_version(dev_version=None):
     """
-    Get the latest candidate OpenShift version using dual-source priority.
+    Get the latest candidate OpenShift version using dual-source priority from accepted streams.
 
     Priority 1: Check 4-stable for RC version (e.g., 4.22.0-rc.*)
     Priority 2: Fall back to 4-dev-preview for EC version (e.g., 4.22.0-ec.*)
@@ -95,42 +106,28 @@ def get_latest_candidate_version(dev_version=None):
         dev_minor = int(parts[1]) + 1
         dev_version = f"{parts[0]}.{dev_minor}"
 
-    try:
-        # Priority 1: Check 4-stable for RC version (e.g., 4.22.0-rc.*)
-        stable_url = f"{RELEASE_STREAM_BASE}/{STABLE_STREAM}/tags"
-        req = Request(stable_url, headers={'User-Agent': 'gap-analysis-script'})
-        with urlopen(req, timeout=10) as response:
-            data = json.loads(response.read())
-            tags = data.get('tags', [])
+    # Fetch accepted streams (single API call)
+    streams = fetch_accepted_streams()
 
-            # Filter for RC versions matching dev version line
-            rc_tags = [tag for tag in tags if tag['name'].startswith(f"{dev_version}.0-rc.")]
+    # Priority 1: Check 4-stable for RC version (e.g., 4.22.0-rc.*)
+    stable_versions = streams.get(STABLE_STREAM, [])
+    rc_versions = [v for v in stable_versions if v.startswith(f"{dev_version}.0-rc.")]
 
-            if rc_tags:
-                # Found RC in 4-stable, return it
-                return rc_tags[0]['name']
+    if rc_versions:
+        # Found RC in 4-stable, return it (already sorted newest first)
+        return rc_versions[0]
 
-        # Priority 2: No RC in 4-stable, check 4-dev-preview for EC version
-        dev_url = f"{RELEASE_STREAM_BASE}/{DEV_PREVIEW_STREAM}/tags"
-        req = Request(dev_url, headers={'User-Agent': 'gap-analysis-script'})
-        with urlopen(req, timeout=10) as response:
-            data = json.loads(response.read())
-            tags = data.get('tags', [])
+    # Priority 2: Check 4-dev-preview for EC version (e.g., 4.22.0-ec.*)
+    dev_versions = streams.get(DEV_PREVIEW_STREAM, [])
+    ec_versions = [v for v in dev_versions if v.startswith(f"{dev_version}.0-ec.")]
 
-            # Filter for EC versions matching dev version line
-            ec_tags = [tag for tag in tags if tag['name'].startswith(f"{dev_version}.0-ec.")]
+    if ec_versions:
+        # Found EC in 4-dev-preview, return it (already sorted newest first)
+        return ec_versions[0]
 
-            if ec_tags:
-                # Found EC in 4-dev-preview, return it
-                return ec_tags[0]['name']
-
-        # No RC or EC found
-        log_error(f"No candidate version found for {dev_version} (checked RC in 4-stable and EC in 4-dev-preview)")
-        sys.exit(1)
-
-    except (URLError, json.JSONDecodeError, KeyError) as e:
-        log_error(f"Failed to fetch latest candidate version: {e}")
-        sys.exit(1)
+    # No RC or EC found
+    log_error(f"No candidate version found for {dev_version} (checked RC in 4-stable and EC in 4-dev-preview)")
+    sys.exit(1)
 
 
 def get_latest_dev_nightly_version():

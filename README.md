@@ -74,6 +74,36 @@ firefox reports/gap-analysis-full_*.html
 jq '.aws_sts.comparison' reports/gap-analysis-full_*.json
 ```
 
+## Quick Reference
+
+### Version Queries (Accepted Builds)
+
+Quick curl commands to check current OpenShift versions from accepted release streams:
+
+```bash
+# Get latest GA version from Sippy
+curl -s https://sippy.dptools.openshift.org/api/releases | \
+  jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last'
+
+# Get latest stable for GA line (e.g., 4.21.x)
+curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
+  jq -r '.["4-stable"][] | select(startswith("4.21."))' | head -1
+
+# Get latest RC candidate (e.g., 4.22.0-rc.*)
+curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
+  jq -r '.["4-stable"][] | select(startswith("4.22.0-rc."))' | head -1
+
+# Get latest EC candidate (e.g., 4.22.0-ec.*)
+curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
+  jq -r '.["4-dev-preview"][] | select(startswith("4.22.0-ec."))' | head -1
+
+# All accepted 4-stable versions
+curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
+  jq -r '.["4-stable"][]'
+```
+
+**Note:** These queries return only **accepted** builds that have passed CI testing. The framework uses this endpoint to ensure reliable version selection.
+
 ## Documentation
 
 - [📘 Overview](docs/overview.md) - What gap analysis does and how it works

@@ -79,6 +79,7 @@ def validate_sts_acknowledgment(baseline, target, comparison=None, baseline_cr_d
         'status': 'PASS' if resources_result['valid'] else 'FAIL',
         'valid': resources_result['valid'],
         'errors': resources_result['errors'],
+        'warnings': resources_result.get('warnings', []),
         'file_count': len(resources_result.get('file_results', {})),
         'changed_files': resources_result.get('changed_files', []),
         'changed_files_count': resources_result.get('changed_files_count', 0)
@@ -526,6 +527,14 @@ Exit Codes:
         log_success(f"  ✓ config.yaml: baseline version {check_2['actual_baseline']} matches expected")
         log_success(f"  ✓ CloudCredential: upgrade version validated")
         log_success("")
+
+        # Display warnings if any (these don't fail validation)
+        if check_1.get('warnings'):
+            log_warning("\n⚠ WARNINGS - Review recommended (does not fail validation):")
+            log_warning("=" * 60)
+            for warning in check_1['warnings']:
+                log_warning(f"{warning}")
+            log_warning("")
     else:
         validation_result = 'FAIL'
         log_error("=" * 60)

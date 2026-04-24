@@ -43,42 +43,86 @@ def fetch_feature_gates(version):
         sys.exit(1)
 
 
+def is_hypershift_relevant(enabled_list):
+    """
+    Check if a feature gate has Hypershift-relevant enablement.
+
+    Returns True if enabled list contains any of:
+    - Default:Hypershift
+    - DevPreviewNoUpgrade:Hypershift
+    - TechPreviewNoUpgrade:Hypershift
+    """
+    hypershift_categories = [
+        'Default:Hypershift',
+        'DevPreviewNoUpgrade:Hypershift',
+        'TechPreviewNoUpgrade:Hypershift'
+    ]
+    return any(cat in enabled_list for cat in hypershift_categories)
+
+
+def has_default_hypershift(enabled_list):
+    """Check if a feature gate has Default:Hypershift enablement."""
+    return 'Default:Hypershift' in enabled_list
+
+
 def compare_feature_gates(baseline_data, target_data):
-    """Compare feature gates between baseline and target versions."""
-    # Extract feature gate names
-    baseline_gates = {g['feature_gate'] for g in baseline_data}
-    target_gates = {g['feature_gate'] for g in target_data}
+    """
+    Compare feature gates between baseline and target versions.
 
-    # Find differences
-    added = sorted(target_gates - baseline_gates)
-    removed = sorted(baseline_gates - target_gates)
-    common = baseline_gates & target_gates
-
-    # Create lookup dicts for common gates
+    Only considers Hypershift-relevant enablement types:
+    - Default:Hypershift
+    - DevPreviewNoUpgrade:Hypershift
+    - TechPreviewNoUpgrade:Hypershift
+    """
+    # Create lookup dicts for all gates
     baseline_dict = {g['feature_gate']: g for g in baseline_data}
     target_dict = {g['feature_gate']: g for g in target_data}
+
+    # Filter to only Hypershift-relevant gates
+    baseline_gates_hypershift = {
+        name for name, gate in baseline_dict.items()
+        if is_hypershift_relevant(gate.get('enabled', []))
+    }
+    target_gates_hypershift = {
+        name for name, gate in target_dict.items()
+        if is_hypershift_relevant(gate.get('enabled', []))
+    }
+
+    # Find differences (only among Hypershift-relevant gates)
+    added = sorted(target_gates_hypershift - baseline_gates_hypershift)
+    removed = sorted(baseline_gates_hypershift - target_gates_hypershift)
+    common = baseline_gates_hypershift & target_gates_hypershift
 
     # Analyze default enablement changes
     newly_default = []
     removed_default = []
+    continues_default = []
 
     for gate in common:
         baseline_enabled = baseline_dict[gate].get('enabled', [])
         target_enabled = target_dict[gate].get('enabled', [])
 
-        baseline_has_default = any('Default:' in e for e in baseline_enabled)
-        target_has_default = any('Default:' in e for e in target_enabled)
+        baseline_has_default = has_default_hypershift(baseline_enabled)
+        target_has_default = has_default_hypershift(target_enabled)
 
         if not baseline_has_default and target_has_default:
             newly_default.append(gate)
         elif baseline_has_default and not target_has_default:
             removed_default.append(gate)
+        elif baseline_has_default and target_has_default:
+            continues_default.append(gate)
+
+    # Also check new gates that are Default:Hypershift
+    for gate in added:
+        if has_default_hypershift(target_dict[gate].get('enabled', [])):
+            newly_default.append(gate)
 
     return {
         'added': sorted(added),
         'removed': sorted(removed),
         'newly_enabled_by_default': sorted(newly_default),
-        'removed_from_default': sorted(removed_default)
+        'removed_from_default': sorted(removed_default),
+        'continues_default_hypershift': sorted(continues_default)
     }
 
 
@@ -88,39 +132,42 @@ def print_comparison(comparison, baseline, target, verbose=False):
     removed_count = len(comparison['removed'])
     newly_default_count = len(comparison['newly_enabled_by_default'])
     removed_default_count = len(comparison['removed_from_default'])
+    continues_default_count = len(comparison.get('continues_default_hypershift', []))
 
     total_changes = added_count + removed_count + newly_default_count + removed_default_count
 
-    if total_changes == 0:
+    if total_changes == 0 and continues_default_count == 0:
         log_success(f"No feature gate differences found between {baseline} and {target}")
         return
 
-    log_info("Feature gate differences detected:")
+    log_info("Feature gate differences detected (Hypershift-relevant only):")
     if added_count > 0:
         log_info(f"  - New feature gates: {added_count}")
     if removed_count > 0:
         log_info(f"  - Removed feature gates: {removed_count}")
     if newly_default_count > 0:
-        log_info(f"  - Newly enabled by default: {newly_default_count}")
+        log_info(f"  - Newly enabled by default (Default:Hypershift): {newly_default_count}")
     if removed_default_count > 0:
         log_info(f"  - Removed from default: {removed_default_count}")
+    if continues_default_count > 0:
+        log_info(f"  - Continues as Default:Hypershift: {continues_default_count}")
 
     if verbose:
         if added_count > 0:
             log_info("")
-            log_info(f"New feature gates in {target}:")
+            log_info(f"New Hypershift-relevant feature gates in {target}:")
             for gate in comparison['added']:
                 log_info(f"  + {gate}")
 
         if removed_count > 0:
             log_info("")
-            log_info(f"Removed feature gates in {target}:")
+            log_info(f"Removed Hypershift-relevant feature gates in {target}:")
             for gate in comparison['removed']:
                 log_info(f"  - {gate}")
 
         if newly_default_count > 0:
             log_info("")
-            log_info(f"Newly enabled by default in {target}:")
+            log_info(f"Newly enabled by default (Default:Hypershift) in {target}:")
             for gate in comparison['newly_enabled_by_default']:
                 log_info(f"  ✓ {gate}")
 
@@ -129,6 +176,12 @@ def print_comparison(comparison, baseline, target, verbose=False):
             log_info(f"Removed from default in {target}:")
             for gate in comparison['removed_from_default']:
                 log_info(f"  ✗ {gate}")
+
+        if continues_default_count > 0:
+            log_info("")
+            log_info(f"Continues as Default:Hypershift in {target}:")
+            for gate in comparison.get('continues_default_hypershift', []):
+                log_info(f"  = {gate}")
 
 
 def main():
@@ -211,6 +264,7 @@ Exit Codes:
     removed_count = len(comparison['removed'])
     newly_default_count = len(comparison['newly_enabled_by_default'])
     removed_default_count = len(comparison['removed_from_default'])
+    continues_default_count = len(comparison.get('continues_default_hypershift', []))
     total_changes = added_count + removed_count + newly_default_count + removed_default_count
     # Feature gates are informational only - always PASS regardless of changes
     validation_result = 'PASS'
@@ -227,6 +281,7 @@ Exit Codes:
             'removed': removed_count,
             'newly_enabled_by_default': newly_default_count,
             'removed_from_default': removed_default_count,
+            'continues_default_hypershift': continues_default_count,
             'total_changes': total_changes
         }
     }

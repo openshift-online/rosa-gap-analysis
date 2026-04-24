@@ -109,6 +109,16 @@ I've detected a new gap script. Let me orchestrate all the related changes.
 | | `docs/validation-checks.md` | Update if check behavior changes |
 | | Skill file | Update if workflow changes |
 | | `CLAUDE.md` | Update if architectural patterns change |
+| **Update shared library** | `scripts/lib/ack_validation.py` | Modify validation logic |
+| | **ALL templates** | **ALWAYS check if templates need updating when result structure changes** (e.g., adding `warnings` field, new comparison categories) |
+| | `scripts/templates/aws-sts.html.j2` | Update if validation_details structure changes |
+| | `scripts/templates/gcp-wif.html.j2` | Update if validation_details structure changes |
+| | `scripts/templates/full-gap.html.j2` | Update if validation_details structure changes |
+| | `scripts/gap-*.py` files | Update if function signatures change |
+| | `scripts/lib/reporters.py` | Update if report data structures change |
+| | **ALL templates** | **ALWAYS check if new fields need display** (e.g., continues_default_hypershift for feature gates) |
+| | `scripts/templates/feature-gates.html.j2` | Update if comparison structure changes |
+| | `scripts/templates/full-gap.html.j2` | Update if comparison structure changes |
 | **Remove gap script** | Delete script file | Remove file |
 | | Delete template | Remove HTML template |
 | | `scripts/gap-all.sh` | Remove execution step |

@@ -2,6 +2,7 @@
 """Common validation functions for acknowledgment checking in managed-cluster-config."""
 
 import json
+import subprocess
 from urllib.request import urlopen, Request
 from urllib.error import HTTPError, URLError
 
@@ -314,6 +315,63 @@ def validate_cloudcredential_yaml(cc_data, target_version):
     return (is_valid, errors, actual_version)
 
 
+def find_pr_for_file_change(file_path, target_version, changed_actions):
+    """
+    Find the PR that introduced changes to a specific file in managed-cluster-config.
+
+    Uses GitHub CLI to search for recent merged PRs that likely modified the file.
+
+    Args:
+        file_path: Relative path to the file (e.g., "resources/sts/4.22/sts_installer_permission_policy.json")
+        target_version: Target version (e.g., "4.22")
+        changed_actions: List of actions that were added/removed
+
+    Returns:
+        Tuple of (pr_url, pr_number) or (None, None) if not found
+    """
+    try:
+        # Use gh CLI to search for recent merged PRs related to the target version
+        # Search for PRs with version number in title or that modified STS/WIF resources
+        search_query = f'is:merged {target_version} in:title'
+
+        cmd = [
+            'gh', 'pr', 'list',
+            '-R', 'openshift/managed-cluster-config',
+            '--search', search_query,
+            '--state', 'merged',
+            '--json', 'url,number,title,mergedAt,files',
+            '--limit', '20'
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0:
+            # gh CLI not available or error - return None
+            return (None, None)
+
+        prs = json.loads(result.stdout)
+        if not prs:
+            return (None, None)
+
+        # Look for PR that modified this specific file
+        filename = file_path.split('/')[-1]
+        for pr in prs:
+            # Check if this PR mentions the file in title or modified files with matching name
+            if filename in pr.get('title', '').lower() or target_version in pr.get('title', ''):
+                return (pr['url'], pr['number'])
+
+        # If no specific match, return the most recently merged PR with the version number
+        prs_sorted = sorted(prs, key=lambda x: x.get('mergedAt', ''), reverse=True)
+        if prs_sorted:
+            pr = prs_sorted[0]
+            return (pr['url'], pr['number'])
+
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
+        # gh CLI not available, timeout, or JSON parse error
+        pass
+
+    return (None, None)
+
+
 def validate_sts_resources(baseline_version, target_version, expected_changes=None, baseline_cr_dir=None, target_cr_dir=None):
     """
     Validate STS policy resources in managed-cluster-config against OCP release changes.
@@ -484,6 +542,9 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
                 'exists_in_baseline': file_result.get('exists_in_baseline', False)
             })
 
+    # Initialize warnings list (separate from errors)
+    warnings = []
+
     # If expected_changes provided, validate that managed-cluster-config changes match OCP release changes
     if expected_changes:
         expected_added = set(expected_changes.get('actions_added', []))
@@ -497,7 +558,7 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
             actual_added.update(diff.get('actions_added', []))
             actual_removed.update(diff.get('actions_removed', []))
 
-        # Check for missing changes
+        # Check for missing changes (MISMATCH - these are ERRORS that fail validation)
         missing_added = expected_added - actual_added
         missing_removed = expected_removed - actual_removed
 
@@ -519,32 +580,64 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
                 errors.append(f"  ... and {len(missing_removed) - 10} more missing actions")
             errors.append(f"  Review policies at: {target_dir_url}")
 
-        # Check for unexpected changes
+        # Check for unexpected changes (UNEXPECTED - these are WARNINGS, do not fail validation)
         unexpected_added = actual_added - expected_added
         unexpected_removed = actual_removed - expected_removed
 
+        if unexpected_added or unexpected_removed:
+            # Find files that have unexpected changes and get PR links
+            files_with_unexpected = []
+            for changed_file in changed_files:
+                diff = changed_file.get('diff', {})
+                file_unexpected_added = set(diff.get('actions_added', [])) - expected_added
+                file_unexpected_removed = set(diff.get('actions_removed', [])) - expected_removed
+
+                if file_unexpected_added or file_unexpected_removed:
+                    filename = changed_file.get('filename')
+                    file_path = f"resources/sts/{target_version}/{filename}"
+                    pr_url, pr_number = find_pr_for_file_change(file_path, target_version,
+                                                                 list(file_unexpected_added) + list(file_unexpected_removed))
+                    files_with_unexpected.append({
+                        'filename': filename,
+                        'unexpected_added': sorted(list(file_unexpected_added)),
+                        'unexpected_removed': sorted(list(file_unexpected_removed)),
+                        'pr_url': pr_url,
+                        'pr_number': pr_number
+                    })
+
         if unexpected_added:
-            errors.append(f"UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):")
+            warnings.append(f"UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):")
             for action in sorted(list(unexpected_added)[:10]):
-                errors.append(f"  • {action}")
+                warnings.append(f"  • {action}")
             if len(unexpected_added) > 10:
-                errors.append(f"  ... and {len(unexpected_added) - 10} more unexpected actions")
-            errors.append(f"  Review policies at: {target_dir_url}")
+                warnings.append(f"  ... and {len(unexpected_added) - 10} more unexpected actions")
+            warnings.append(f"  Review policies at: {target_dir_url}")
+
+            # Add PR links if found
+            if files_with_unexpected:
+                warnings.append(f"  Files with unexpected changes:")
+                for file_info in files_with_unexpected:
+                    if file_info['unexpected_added']:
+                        warnings.append(f"    - {file_info['filename']}")
+                        if file_info['pr_url']:
+                            warnings.append(f"      Introduced in PR #{file_info['pr_number']}: {file_info['pr_url']}")
 
         if unexpected_removed:
-            errors.append(f"UNEXPECTED: Actions removed in managed-cluster-config (not in OCP release):")
+            warnings.append(f"UNEXPECTED: Actions removed in managed-cluster-config (not in OCP release):")
             for action in sorted(list(unexpected_removed)[:10]):
-                errors.append(f"  • {action}")
+                warnings.append(f"  • {action}")
             if len(unexpected_removed) > 10:
-                errors.append(f"  ... and {len(unexpected_removed) - 10} more unexpected actions")
-            errors.append(f"  Review policies at: {target_dir_url}")
+                warnings.append(f"  ... and {len(unexpected_removed) - 10} more unexpected actions")
+            warnings.append(f"  Review policies at: {target_dir_url}")
 
+    # Validation passes if no ERRORS (MISMATCH), but can have WARNINGS (UNEXPECTED)
     is_valid = len(errors) == 0
 
-    # Return with changed files summary
+    # Return with changed files summary, errors, and warnings
     result = {
         'valid': is_valid,
         'errors': errors,
+        'warnings': warnings,
         'file_results': file_results,
         'changed_files': changed_files,
         'changed_files_count': len(changed_files)

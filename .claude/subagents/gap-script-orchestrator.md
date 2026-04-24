@@ -1,11 +1,16 @@
 ---
 name: gap-script-orchestrator
 description: >
-  Orchestrates related changes when gap analysis scripts are added, updated, or removed.
-  Auto-triggers on changes to scripts/gap-*.py files.
+  Orchestrates related changes when gap analysis scripts or shared libraries are modified.
+  Ensures templates, documentation, and skills stay synchronized with code changes.
 trigger:
   on_file_change:
     - "scripts/gap-*.py"
+    - "scripts/lib/ack_validation.py"
+    - "scripts/lib/reporters.py"
+  when_result_structure_changes:
+    - "validation_details (warnings, errors, new checks)"
+    - "comparison (new categories like continues_default_hypershift)"
 model: sonnet
 ---
 
@@ -116,6 +121,40 @@ I auto-trigger when:
 5. **Confirm deletions:**
    - Ask before deleting files
    - Suggest archiving instead of deleting
+
+### On Shared Library Update (NEW)
+
+**Triggered when:** `scripts/lib/ack_validation.py`, `scripts/lib/reporters.py`, or other shared libraries change
+
+1. **Detect result structure changes:**
+   - Check if return values modified (e.g., added `warnings` field)
+   - Check if new fields added to validation results
+   - Check if comparison structures changed
+
+2. **Identify affected templates:**
+   - All templates using `validation_details` → if ack_validation.py changed
+   - All templates using `comparison` → if gap script comparison logic changed
+   - Full-gap template → if any structure changed
+
+3. **Update templates systematically:**
+   - `scripts/templates/aws-sts.html.j2` → add display for new `warnings` field
+   - `scripts/templates/gcp-wif.html.j2` → add display for new `warnings` field
+   - `scripts/templates/feature-gates.html.j2` → add display for new comparison categories (e.g., `continues_default_hypershift`)
+   - `scripts/templates/full-gap.html.j2` → update all sections with new fields
+
+4. **Verify template-data synchronization:**
+   - Parse templates to identify used variables
+   - Parse scripts to identify generated variables
+   - Flag mismatches (variables in template but not in data, or vice versa)
+
+5. **Test report generation:**
+   - Suggest running gap scripts to verify templates render correctly
+   - Check for Jinja2 template errors
+
+**Example Triggers:**
+- Adding `warnings` field to `validate_sts_resources()` return value
+- Adding `continues_default_hypershift` to feature gates comparison
+- Changing structure of `validation_details.check_1_resources`
 
 ## Output Format
 

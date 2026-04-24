@@ -1,4 +1,46 @@
 {
   "defaultModel": "sonnet",
-  "autoMemory": true
+  "autoMemory": true,
+  "allowedBashPrompts": [
+    {
+      "prompt": "read files and directories",
+      "commands": ["ls", "cat", "head", "tail", "less", "more", "wc", "file", "stat"]
+    },
+    {
+      "prompt": "search and grep",
+      "commands": ["grep", "rg", "ag", "ack", "find"]
+    },
+    {
+      "prompt": "git read operations",
+      "commands": ["git status", "git log", "git diff", "git show", "git branch", "git ls-files", "git blame"]
+    },
+    {
+      "prompt": "run gap analysis scripts (generates reports to /tmp or reports/)",
+      "commands": ["python3 ./scripts/gap-*.py", "python3 scripts/gap-*.py", "./scripts/gap-all.sh", "scripts/gap-all.sh"]
+    },
+    {
+      "prompt": "extract OCP release credentials (read-only, outputs to /tmp)",
+      "commands": ["oc adm release extract --credentials-requests"]
+    },
+    {
+      "prompt": "query Sippy API",
+      "commands": ["curl -s https://sippy.dptools.openshift.org/api/*", "curl https://sippy.dptools.openshift.org/api/*"]
+    },
+    {
+      "prompt": "gh CLI read-only operations",
+      "commands": ["gh pr list", "gh pr view", "gh api", "gh repo view"]
+    },
+    {
+      "prompt": "JSON processing",
+      "commands": ["jq"]
+    },
+    {
+      "prompt": "check command availability",
+      "commands": ["which", "command -v", "type"]
+    },
+    {
+      "prompt": "system info",
+      "commands": ["uname", "hostname", "whoami", "id", "env", "printenv", "pwd"]
+    }
+  ]
 }

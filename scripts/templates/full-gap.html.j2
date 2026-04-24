@@ -543,6 +543,23 @@
                 </ul>
             </div>
 
+            {% if aws_sts.validation_details.check_1_resources.warnings %}
+            <div class="alert warning" style="background-color: #fff3e0; border-left-color: #ff9800;">
+                <strong>⚠️ Warnings</strong>
+                <p style="margin: 10px 0;"><em>The following changes are in managed-cluster-config but NOT in the OCP release. These do not fail validation but should be reviewed.</em></p>
+                <ul style="margin: 10px 0 0 0; padding-left: 20px;">
+                {% for warning in aws_sts.validation_details.check_1_resources.warnings %}
+                    {% if 'https://' in warning %}
+                        {% set parts = warning.split('https://') %}
+                        <li style="margin-left: 20px;">{{ parts[0] }}<a href="https://{{ parts[1].strip() }}" target="_blank" style="color: #007bff; text-decoration: underline;">https://{{ parts[1].strip() }}</a></li>
+                    {% else %}
+                        <li style="margin-left: 20px;">{{ warning }}</li>
+                    {% endif %}
+                {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+
             {% if aws_added + aws_removed > 0 %}
             <h3>Policy Changes Details</h3>
             {% endif %}
@@ -849,6 +866,13 @@
                                 <td style="text-align: center;">{{ fg_total }}</td>
                                 <td style="text-align: center;">100%</td>
                             </tr>
+                            {% if feature_gates.comparison.continues_default_hypershift %}
+                            <tr style="background-color: #e8f5e9;">
+                                <td><strong>Continues as Default:Hypershift</strong></td>
+                                <td style="text-align: center;"><strong>{{ feature_gates.comparison.continues_default_hypershift|length }}</strong></td>
+                                <td style="text-align: center;"><em>Stable</em></td>
+                            </tr>
+                            {% endif %}
                         </tbody>
                     </table>
                 </div>
@@ -951,6 +975,23 @@
                 <div class="content-wrapper" id="removedDefaultGates">
                     {% for gate in feature_gates.comparison.removed_from_default %}
                     <div class="feature-gate-item removed" data-gate="{{ gate|lower }}">
+                        <code>{{ gate }}</code>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
+
+            {% if feature_gates.comparison.continues_default_hypershift %}
+            {% set fg_continues = feature_gates.comparison.continues_default_hypershift|length %}
+            <details>
+                <summary>✓ Continues as Default:Hypershift ({{ fg_continues }})</summary>
+                <div style="background-color: #e8f5e9; padding: 15px; border-left: 4px solid #4caf50; margin: 10px 0;">
+                    <p><em>These feature gates remain enabled by default (Default:Hypershift) in both {{ baseline }} and {{ target }}.</em></p>
+                </div>
+                <div class="content-wrapper" id="continuesDefaultGates">
+                    {% for gate in feature_gates.comparison.continues_default_hypershift %}
+                    <div class="feature-gate-item added" data-gate="{{ gate|lower }}">
                         <code>{{ gate }}</code>
                     </div>
                     {% endfor %}

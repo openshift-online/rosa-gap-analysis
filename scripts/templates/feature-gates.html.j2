@@ -113,6 +113,7 @@
             <p><strong>Generated:</strong> {{ timestamp }}</p>
             <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code></p>
             <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
+            <p><strong>Filter:</strong> Hypershift-relevant only (Default:Hypershift, DevPreviewNoUpgrade:Hypershift, TechPreviewNoUpgrade:Hypershift)</p>
         </div>
 
         <h2>Summary</h2>
@@ -135,12 +136,16 @@
                     <td style="text-align: center;">{{ comparison.removed|length }}</td>
                 </tr>
                 <tr>
-                    <td>Newly Enabled by Default</td>
+                    <td>Newly Enabled by Default (Default:Hypershift)</td>
                     <td style="text-align: center;">{{ comparison.newly_enabled_by_default|length }}</td>
                 </tr>
                 <tr>
                     <td>Removed from Default</td>
                     <td style="text-align: center;">{{ comparison.removed_from_default|length }}</td>
+                </tr>
+                <tr style="background-color: #e8f5e9;">
+                    <td><strong>Continues as Default:Hypershift</strong></td>
+                    <td style="text-align: center; font-weight: bold;">{{ comparison.continues_default_hypershift|length if comparison.continues_default_hypershift else 0 }}</td>
                 </tr>
             </tbody>
         </table>
@@ -223,6 +228,29 @@
                 <tr>
                     <td><code>{{ gate }}</code></td>
                     <td class="removed">⚠️ Removed from Default</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if comparison.continues_default_hypershift %}
+        <h3>Continues as Default:Hypershift</h3>
+        <p style="background-color: #e8f5e9; padding: 10px; border-left: 4px solid #4caf50;">
+            These feature gates remain enabled by default (Default:Hypershift) in both {{ baseline }} and {{ target }}.
+        </p>
+        <table>
+            <thead>
+                <tr>
+                    <th>Feature Gate</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for gate in comparison.continues_default_hypershift %}
+                <tr>
+                    <td><code>{{ gate }}</code></td>
+                    <td class="added">✓ Default:Hypershift</td>
                 </tr>
                 {% endfor %}
             </tbody>

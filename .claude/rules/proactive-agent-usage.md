@@ -26,6 +26,9 @@ When these conditions are detected, **suggest** the appropriate subagent(s):
 | `scripts/gap-*.py` modified (high-impact) | gap-script-orchestrator | If validation logic or output changes |
 | User asks to "add gap script" | gap-script-orchestrator | After showing plan |
 | User mentions "orchestrate" | gap-script-orchestrator | Immediately |
+| **`scripts/lib/ack_validation.py` modified** | **gap-script-orchestrator** | **If result structure changes (new fields like `warnings`, changed return values)** |
+| **`scripts/lib/*.py` adds/removes fields in results** | **gap-script-orchestrator** | **When return structure changes affect templates** |
+| **`scripts/gap-*.py` adds new comparison categories** | **gap-script-orchestrator** | **When new fields added to comparison dict (e.g., `continues_default_hypershift`)** |
 | Documentation looks outdated vs code | docs-reviewer | When inconsistency detected |
 | Skills look outdated vs code | skills-reviewer | When inconsistency detected |
 | CLAUDE.md needs sync | claude-md-updater | When changes affect architecture |
@@ -112,6 +115,42 @@ Adding CHECK #2 is a high-impact change.
 Approve this approach? Should I invoke the subagents?
 ```
 
+### Pattern 4: Shared Library Change - Check Templates
+
+**User:** "I modified scripts/lib/ack_validation.py to add a 'warnings' field to the result"
+
+**Your Response:**
+```
+## Implementation Plan
+
+This is a high-impact change affecting template rendering.
+
+### Impact Analysis:
+- Added `warnings` field to validation result structure
+- All templates that display validation results need updating
+- Templates must render warnings separately from errors
+
+### Files Affected:
+1. scripts/lib/ack_validation.py (validation logic - already done)
+2. scripts/gap-aws-sts.py (may need to pass warnings to templates)
+3. scripts/gap-gcp-wif.py (same as above)
+4. scripts/templates/aws-sts.html.j2 (add warnings display section)
+5. scripts/templates/gcp-wif.html.j2 (add warnings display section)
+6. scripts/templates/full-gap.html.j2 (add warnings display section)
+
+### Subagents:
+- gap-script-orchestrator: Can update all affected templates and scripts
+
+Approve this plan? Should I invoke gap-script-orchestrator?
+```
+
+**After User Says "Yes" or "Proceed":**
+```
+[Invoke Agent tool with gap-script-orchestrator]
+[Wait for completion]
+[Provide summary of template updates]
+```
+
 ## When NOT to Suggest Subagents
 
 **Don't suggest subagents if:**
@@ -139,11 +178,18 @@ Approve this approach? Should I invoke the subagents?
 Remember: In this repository, **you are responsible for identifying what needs updating**. The subagents help you ensure:
 
 1. **No missing templates** when scripts are added
-2. **No outdated documentation** when behavior changes
-3. **No orphaned files** when scripts are removed
-4. **No inconsistent check numbering** across files
+2. **No outdated templates** when validation result structures change (e.g., adding `warnings` field, new comparison categories)
+3. **No outdated documentation** when behavior changes
+4. **No orphaned files** when scripts are removed
+5. **No inconsistent check numbering** across files
+6. **Template-data synchronization** when shared libraries (`scripts/lib/*.py`) modify return structures
 
 **Your job:** Identify high-impact changes, show plan, suggest appropriate subagents, wait for approval.
+
+**Critical Reminder:** When modifying:
+- `scripts/lib/ack_validation.py` → Check **ALL** templates that use `validation_details`
+- `scripts/gap-*.py` comparison logic → Check templates that use `comparison`
+- Any function returning data to templates → Check template compatibility
 
 ## Exception: User Override
 

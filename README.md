@@ -39,6 +39,7 @@ See [Validation Checks](docs/validation-checks.md) for detailed information abou
 - 🤖 **AI-Powered**: Claude Code skills for intelligent analysis and recommendations
 - ✅ **CI/CD Ready**: Exit codes designed for pipeline integration
 - 📦 **Container-Based**: Pre-built container image for OpenShift CI (Prow)
+- 🔗 **PR Link Tracking**: Automatic GitHub PR attribution for unexpected managed-cluster-config changes
 
 ## Quick Start
 
@@ -168,6 +169,12 @@ Scripts are designed for CI/CD integration:
 | `gap-feature-gates.py` | Always on success | Execution error only (check 6 is informational) |
 | `gap-all.sh` | All checks 1-5 pass | Any check 1-5 fails |
 
+**Important:** Validation distinguishes between **errors** and **warnings**:
+- **ERRORS** (missing expected changes): Validation FAILS → exit 1
+- **WARNINGS** (unexpected changes in managed-cluster-config): Validation PASSES with warnings → exit 0
+
+When unexpected changes are detected, reports include GitHub PR links showing which PR introduced the change, helping identify the context and reasoning behind differences from the OCP payload.
+
 ```bash
 # Run full analysis; exits 1 if any validation checks fail
 ./scripts/gap-all.sh --baseline 4.21 --target 4.22
@@ -176,7 +183,7 @@ Scripts are designed for CI/CD integration:
 jq -e '.comparison.actions.target_only | length > 0' reports/gap-analysis-aws-sts_*.json
 ```
 
-See [Getting Started](docs/getting-started.md) for detailed examples.
+See [Getting Started](docs/getting-started.md) and [Validation Checks](docs/validation-checks.md) for detailed examples.
 
 ## Claude Code Integration
 

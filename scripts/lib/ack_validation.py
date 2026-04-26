@@ -544,6 +544,7 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
 
     # Initialize warnings list (separate from errors)
     warnings = []
+    warnings_structured = []  # Structured data for table rendering
 
     # If expected_changes provided, validate that managed-cluster-config changes match OCP release changes
     if expected_changes:
@@ -606,26 +607,77 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
                     })
 
         if unexpected_added:
+            # Build action-to-PR mapping for inline display
+            action_to_pr = {}
+            for file_info in files_with_unexpected:
+                for action in file_info['unexpected_added']:
+                    if action not in action_to_pr and file_info['pr_url']:
+                        # Use first PR found for this action (typically same PR for all files in a version)
+                        action_to_pr[action] = {
+                            'pr_number': file_info['pr_number'],
+                            'pr_url': file_info['pr_url']
+                        }
+
             warnings.append(f"UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):")
             for action in sorted(list(unexpected_added)[:10]):
-                warnings.append(f"  • {action}")
+                if action in action_to_pr:
+                    pr_info = action_to_pr[action]
+                    # Format: action (MCC PR #123 @ URL) - template will parse this
+                    warnings.append(f"  • {action} (MCC PR #{pr_info['pr_number']} @ {pr_info['pr_url']})")
+                    # Add structured data for table rendering
+                    warnings_structured.append({
+                        'type': 'Added',
+                        'action': action,
+                        'pr_number': pr_info['pr_number'],
+                        'pr_url': pr_info['pr_url']
+                    })
+                else:
+                    warnings.append(f"  • {action}")
+                    # Add structured data without PR link
+                    warnings_structured.append({
+                        'type': 'Added',
+                        'action': action,
+                        'pr_number': None,
+                        'pr_url': None
+                    })
             if len(unexpected_added) > 10:
                 warnings.append(f"  ... and {len(unexpected_added) - 10} more unexpected actions")
             warnings.append(f"  Review policies at: {target_dir_url}")
 
-            # Add PR links if found
-            if files_with_unexpected:
-                warnings.append(f"  Files with unexpected changes:")
-                for file_info in files_with_unexpected:
-                    if file_info['unexpected_added']:
-                        warnings.append(f"    - {file_info['filename']}")
-                        if file_info['pr_url']:
-                            warnings.append(f"      Introduced in PR #{file_info['pr_number']}: {file_info['pr_url']}")
-
         if unexpected_removed:
+            # Build action-to-PR mapping for inline display
+            action_to_pr = {}
+            for file_info in files_with_unexpected:
+                for action in file_info['unexpected_removed']:
+                    if action not in action_to_pr and file_info['pr_url']:
+                        # Use first PR found for this action (typically same PR for all files in a version)
+                        action_to_pr[action] = {
+                            'pr_number': file_info['pr_number'],
+                            'pr_url': file_info['pr_url']
+                        }
+
             warnings.append(f"UNEXPECTED: Actions removed in managed-cluster-config (not in OCP release):")
             for action in sorted(list(unexpected_removed)[:10]):
-                warnings.append(f"  • {action}")
+                if action in action_to_pr:
+                    pr_info = action_to_pr[action]
+                    # Format: action (MCC PR #123 @ URL) - template will parse this
+                    warnings.append(f"  • {action} (MCC PR #{pr_info['pr_number']} @ {pr_info['pr_url']})")
+                    # Add structured data for table rendering
+                    warnings_structured.append({
+                        'type': 'Removed',
+                        'action': action,
+                        'pr_number': pr_info['pr_number'],
+                        'pr_url': pr_info['pr_url']
+                    })
+                else:
+                    warnings.append(f"  • {action}")
+                    # Add structured data without PR link
+                    warnings_structured.append({
+                        'type': 'Removed',
+                        'action': action,
+                        'pr_number': None,
+                        'pr_url': None
+                    })
             if len(unexpected_removed) > 10:
                 warnings.append(f"  ... and {len(unexpected_removed) - 10} more unexpected actions")
             warnings.append(f"  Review policies at: {target_dir_url}")
@@ -638,6 +690,7 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
         'valid': is_valid,
         'errors': errors,
         'warnings': warnings,
+        'warnings_structured': warnings_structured,  # Structured data for table rendering
         'file_results': file_results,
         'changed_files': changed_files,
         'changed_files_count': len(changed_files)

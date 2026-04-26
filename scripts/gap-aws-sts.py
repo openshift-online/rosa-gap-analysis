@@ -80,6 +80,7 @@ def validate_sts_acknowledgment(baseline, target, comparison=None, baseline_cr_d
         'valid': resources_result['valid'],
         'errors': resources_result['errors'],
         'warnings': resources_result.get('warnings', []),
+        'warnings_structured': resources_result.get('warnings_structured', []),
         'file_count': len(resources_result.get('file_results', {})),
         'changed_files': resources_result.get('changed_files', []),
         'changed_files_count': resources_result.get('changed_files_count', 0)

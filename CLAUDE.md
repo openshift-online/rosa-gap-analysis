@@ -122,6 +122,7 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 - Validates policy files match OCP release credential requests using **per-file comparison**
 - Per-file validation: Aggregates all permission changes across individual CredentialRequest files, not just globally-new permissions (a permission can be new to one CR but already exist in another)
 - Checks acknowledgment files (config.yaml, cloudcredential.yaml) for required structure
+- Detects related PRs using GitHub REST API (unauthenticated, 60 req/hour limit) with gh CLI fallback
 
 **Report generation (reporters.py):**
 - Templates in `scripts/templates/*.html.j2`
@@ -236,7 +237,7 @@ from reporters import generate_html_report, generate_json_report
 - `PyYAML` (`pip install pyyaml`)
 - `curl` (Sippy API)
 - `jq` (bash JSON parsing)
-- `gh` (GitHub CLI - for PR link detection in warnings)
+- `gh` (GitHub CLI - optional fallback for PR link detection if GH_TOKEN set)
 
 **CI/failure analysis:**
 - `gcloud` (GCS artifact downloads via `gcloud storage cp`)

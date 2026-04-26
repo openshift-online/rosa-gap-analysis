@@ -95,7 +95,7 @@ UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):
       Introduced in PR #1234: https://github.com/openshift/managed-cluster-config/pull/1234
 ```
 
-**PR Link Feature:** When unexpected changes are detected (warnings), the validation system automatically searches for the GitHub PR that introduced the change using the `gh` CLI. This helps identify the context and reasoning behind managed-cluster-config changes that differ from the OCP payload.
+**PR Link Feature:** When unexpected changes are detected (warnings), the validation system automatically searches for the GitHub PR that introduced the change using the GitHub REST API (unauthenticated, 60 requests/hour). If a `GH_TOKEN` is available, it uses authenticated requests for higher rate limits and falls back to `gh` CLI if needed. This helps identify the context and reasoning behind managed-cluster-config changes that differ from the OCP payload.
 
 ## Validation Details
 

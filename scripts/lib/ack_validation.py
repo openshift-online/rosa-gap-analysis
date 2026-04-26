@@ -319,7 +319,8 @@ def find_pr_for_file_change(file_path, target_version, changed_actions):
     """
     Find the PR that introduced changes to a specific file in managed-cluster-config.
 
-    Uses GitHub CLI to search for recent merged PRs that likely modified the file.
+    Uses GitHub REST API to search for recent merged PRs that likely modified the file.
+    Falls back to gh CLI if GH_TOKEN is available in environment.
 
     Args:
         file_path: Relative path to the file (e.g., "resources/sts/4.22/sts_installer_permission_policy.json")
@@ -329,45 +330,81 @@ def find_pr_for_file_change(file_path, target_version, changed_actions):
     Returns:
         Tuple of (pr_url, pr_number) or (None, None) if not found
     """
+    import os
+    from urllib.request import Request
+    from urllib.error import HTTPError, URLError
+    from urllib.parse import quote_plus
+
     try:
-        # Use gh CLI to search for recent merged PRs related to the target version
-        # Search for PRs with version number in title or that modified STS/WIF resources
-        search_query = f'is:merged {target_version} in:title'
+        # Use GitHub REST API for unauthenticated access (60 requests/hour limit)
+        # Search for merged PRs with version number in title
+        # API: https://docs.github.com/en/rest/search/search?apiVersion=2022-11-28#search-issues-and-pull-requests
+        query = f'{target_version} in:title repo:openshift/managed-cluster-config is:pr is:merged'
+        api_url = f'https://api.github.com/search/issues?q={quote_plus(query)}&sort=updated&order=desc&per_page=20'
 
-        cmd = [
-            'gh', 'pr', 'list',
-            '-R', 'openshift/managed-cluster-config',
-            '--search', search_query,
-            '--state', 'merged',
-            '--json', 'url,number,title,mergedAt,files',
-            '--limit', '20'
-        ]
+        # Add authentication if GH_TOKEN is available
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+        gh_token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
+        if gh_token:
+            headers['Authorization'] = f'token {gh_token}'
 
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-        if result.returncode != 0:
-            # gh CLI not available or error - return None
+        req = Request(api_url, headers=headers)
+        response = urlopen(req, timeout=10)
+        data = json.loads(response.read().decode('utf-8'))
+
+        items = data.get('items', [])
+        if not items:
             return (None, None)
 
-        prs = json.loads(result.stdout)
-        if not prs:
-            return (None, None)
-
-        # Look for PR that modified this specific file
+        # Look for PR that mentions the version in title
         filename = file_path.split('/')[-1]
-        for pr in prs:
-            # Check if this PR mentions the file in title or modified files with matching name
-            if filename in pr.get('title', '').lower() or target_version in pr.get('title', ''):
-                return (pr['url'], pr['number'])
+        for item in items:
+            title = item.get('title', '').lower()
+            # Check if this PR mentions the version or file in title
+            if target_version in title or filename in title:
+                return (item['html_url'], item['number'])
 
-        # If no specific match, return the most recently merged PR with the version number
-        prs_sorted = sorted(prs, key=lambda x: x.get('mergedAt', ''), reverse=True)
-        if prs_sorted:
-            pr = prs_sorted[0]
-            return (pr['url'], pr['number'])
+        # If no specific match, return the most recently updated PR with the version number
+        if items:
+            pr = items[0]
+            return (pr['html_url'], pr['number'])
 
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
-        # gh CLI not available, timeout, or JSON parse error
+    except (HTTPError, URLError, json.JSONDecodeError, KeyError, Exception):
+        # API call failed, try falling back to gh CLI if available
         pass
+
+    # Fallback: try gh CLI if GH_TOKEN is set
+    gh_token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
+    if gh_token:
+        try:
+            search_query = f'is:merged {target_version} in:title'
+            cmd = [
+                'gh', 'pr', 'list',
+                '-R', 'openshift/managed-cluster-config',
+                '--search', search_query,
+                '--state', 'merged',
+                '--json', 'url,number,title,mergedAt',
+                '--limit', '20'
+            ]
+
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                prs = json.loads(result.stdout)
+                if prs:
+                    filename = file_path.split('/')[-1]
+                    for pr in prs:
+                        title = pr.get('title', '').lower()
+                        if filename in title or target_version in title:
+                            return (pr['url'], pr['number'])
+
+                    # Return most recent
+                    prs_sorted = sorted(prs, key=lambda x: x.get('mergedAt', ''), reverse=True)
+                    if prs_sorted:
+                        pr = prs_sorted[0]
+                        return (pr['url'], pr['number'])
+
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
+            pass
 
     return (None, None)
 

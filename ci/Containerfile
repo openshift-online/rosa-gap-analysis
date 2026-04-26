@@ -35,6 +35,13 @@ RUN arch=$(uname -m) && \
     chmod +x /usr/local/bin/yq && \
     yq --version
 
+# Install gh CLI (GitHub CLI - required for PR link detection in warnings)
+RUN dnf install -y 'dnf-command(config-manager)' && \
+    dnf config-manager --add-repo https://cli.github.com/packages/rpm/gh-cli.repo && \
+    dnf install -y gh && \
+    dnf clean all && \
+    gh --version
+
 # Install oc CLI (OpenShift client - required for 'oc adm release extract')
 RUN curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-${OC_VERSION}/openshift-client-linux.tar.gz" -o /tmp/oc.tar.gz && \
     tar -xzf /tmp/oc.tar.gz -C /usr/local/bin oc kubectl && \
@@ -63,6 +70,7 @@ RUN echo "Verifying tool installations..." && \
     bash --version && \
     jq --version && \
     yq --version && \
+    gh --version && \
     oc version --client && \
     python3 --version && \
     python3 -c "import yaml; print('PyYAML available')" && \

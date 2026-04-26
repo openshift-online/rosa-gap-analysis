@@ -236,6 +236,7 @@ from reporters import generate_html_report, generate_json_report
 - `PyYAML` (`pip install pyyaml`)
 - `curl` (Sippy API)
 - `jq` (bash JSON parsing)
+- `gh` (GitHub CLI - for PR link detection in warnings)
 
 **CI/failure analysis:**
 - `gcloud` (GCS artifact downloads via `gcloud storage cp`)

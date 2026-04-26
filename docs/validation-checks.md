@@ -66,6 +66,37 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 [Detailed error messages with GitHub URLs]
 ```
 
+## Validation Results: Errors vs Warnings
+
+The validation system distinguishes between **errors** (blocking issues) and **warnings** (informational):
+
+| Result Type | Description | Impact |
+|-------------|-------------|--------|
+| **ERROR** | Mismatch between OCP release and managed-cluster-config (missing expected changes) | Validation FAILS (exit 1) |
+| **WARNING** | Unexpected changes in managed-cluster-config (not in OCP release payload) | Validation PASSES but warns (exit 0) |
+
+### Example Output
+
+**ERROR (Validation Fails):**
+```
+MISMATCH: Expected actions added in OCP release but NOT found in managed-cluster-config:
+  • ec2:DescribeVpcEndpoints
+  • s3:CreateBucket
+  Review policies at: https://github.com/openshift/managed-cluster-config/tree/master/resources/sts/4.22
+```
+
+**WARNING (Validation Passes with Information):**
+```
+UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):
+  • ec2:DescribeNetworkInterfaces
+  Review policies at: https://github.com/openshift/managed-cluster-config/tree/master/resources/sts/4.22
+  Files with unexpected changes:
+    - sts_installer_permission_policy.json
+      Introduced in PR #1234: https://github.com/openshift/managed-cluster-config/pull/1234
+```
+
+**PR Link Feature:** When unexpected changes are detected (warnings), the validation system automatically searches for the GitHub PR that introduced the change using the `gh` CLI. This helps identify the context and reasoning behind managed-cluster-config changes that differ from the OCP payload.
+
 ## Validation Details
 
 ### Check 1: AWS STS Resources
@@ -84,8 +115,8 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 
 **Pass criteria:**
 - All policy files exist and are valid JSON
-- Policy changes match OCP release changes exactly
-- No missing or unexpected permissions
+- Policy changes match OCP release changes exactly (ERRORS cause failure)
+- Unexpected permissions generate WARNINGS but do not fail validation
 
 ### Check 2: AWS STS Admin Ack
 
@@ -119,7 +150,8 @@ Location: https://github.com/openshift/managed-cluster-config/tree/master/...
 **Pass criteria:**
 - vanilla.yaml exists and is valid YAML
 - Template structure is correct
-- GCP permissions match OCP release changes
+- GCP permissions match OCP release changes exactly (ERRORS cause failure)
+- Unexpected permissions generate WARNINGS but do not fail validation
 
 ### Check 4: GCP WIF Admin Ack
 

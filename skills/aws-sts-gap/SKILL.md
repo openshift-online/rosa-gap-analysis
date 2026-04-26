@@ -33,6 +33,7 @@ Trigger this skill when:
 2. **Converts CredentialsRequest manifests** to consolidated IAM policy JSON documents
 3. **Compares IAM permissions** at action-level and service-level to identify changes
 4. **Validates policy files** against OCP release credential requests using **per-file comparison** (aggregates all permission changes across individual CRs, not just globally-new permissions); exits 1 if validation fails (CHECK #1 or #2) or on execution failures
+5. **Detects unexpected permission changes** in managed-cluster-config that don't exist in OCP payload, displaying warnings with GitHub PR links to the introducing commits
 
 ## Workflow
 
@@ -135,6 +136,23 @@ The script outputs log messages to stderr and exits based on validation result:
 
 Exit code: `0` (validation PASSED) or `1` (validation FAILED - CHECK #1 or #2)
 
+**Warnings Section (when MCC contains unexpected permission changes):**
+```
+⚠️  WARNINGS DETECTED:
+
+The following permission changes exist in managed-cluster-config but were NOT found in the OCP payload.
+These changes may have been introduced directly via managed-cluster-config PRs:
+
+Unexpected Added Permissions (2):
+  - ec2:CreateTags [Introduced in PR #35: https://github.com/openshift/managed-cluster-config/pull/35]
+  - ec2:DeleteTags [Introduced in PR #35: https://github.com/openshift/managed-cluster-config/pull/35]
+
+Unexpected Removed Permissions (1):
+  - s3:GetBucketLocation [Introduced in PR #42: https://github.com/openshift/managed-cluster-config/pull/42]
+```
+
+This warning indicates that managed-cluster-config contains permission changes that are not reflected in the OpenShift release payload, potentially introduced through direct MCC pull requests.
+
 Or:
 
 ```
@@ -164,6 +182,11 @@ python3 ./scripts/gap-aws-sts.py --baseline 4.21 --target 4.22
 jq '.comparison.actions.target_only' reports/gap-analysis-aws-sts_*.json  # Added actions
 jq '.comparison.actions.baseline_only' reports/gap-analysis-aws-sts_*.json  # Removed actions
 jq '.comparison.actions.common' reports/gap-analysis-aws-sts_*.json  # Unchanged actions
+
+# Check for warnings (unexpected MCC changes with PR links)
+jq '.validation.warnings' reports/gap-analysis-aws-sts_*.json  # Unexpected permission changes
+jq '.validation.warnings.unexpected_added' reports/gap-analysis-aws-sts_*.json  # Unexpected additions
+jq '.validation.warnings.unexpected_removed' reports/gap-analysis-aws-sts_*.json  # Unexpected removals
 
 # Open HTML report in browser
 firefox reports/gap-analysis-aws-sts_*.html
@@ -329,3 +352,9 @@ fi
 - Review the raw JSON files in the temp directory if results seem unexpected
 - Compare across multiple version pairs to identify patterns
 - Auto-detected versions include validation (stable→GA, candidate→dev)
+
+**Warnings:**
+- Warnings indicate permission changes in managed-cluster-config NOT found in OCP release
+- Each warning includes a GitHub PR link to trace the origin of unexpected changes
+- Warnings don't fail validation (exit 0) but require investigation
+- Review PR links to understand why MCC diverged from OCP payload

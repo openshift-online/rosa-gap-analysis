@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 """Common utilities for gap analysis scripts."""
 
-import os
 import shutil
 import sys
 from pathlib import Path
 from urllib.request import urlopen, Request
-from urllib.error import HTTPError, URLError
 
 
 # ANSI color codes

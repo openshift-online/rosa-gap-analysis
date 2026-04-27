@@ -39,6 +39,7 @@ JOB_ID=""
 TEST_MODE=false
 DRY_RUN=false
 VERBOSE=false
+WEB_AUTH=false
 
 # Log functions
 log_info() {
@@ -82,6 +83,7 @@ OPTIONS:
     -t, --test-mode        Create PR to TEST_REPO instead of production
     -d, --dry-run          Preview changes without creating PR
     -v, --verbose          Enable verbose output
+    --web-auth            Authenticate via web browser if not logged in
     -h, --help            Display this help message
 
 PREREQUISITES:
@@ -113,6 +115,9 @@ EXAMPLES:
 
     # Verbose output
     $(basename "$0") --verbose
+
+    # Authenticate via web browser if needed
+    $(basename "$0") --web-auth
 
 MANUAL WORKFLOW (for review/debugging):
     If you need to review artifacts before creating PR:
@@ -152,6 +157,10 @@ parse_args() {
                 ;;
             -v|--verbose)
                 VERBOSE=true
+                shift
+                ;;
+            --web-auth)
+                WEB_AUTH=true
                 shift
                 ;;
             -h|--help)
@@ -224,6 +233,10 @@ main() {
 
     if [ -n "${JOB_ID}" ]; then
         analyze_cmd+=("--job-id" "${JOB_ID}")
+    fi
+
+    if [ "${WEB_AUTH}" = true ]; then
+        analyze_cmd+=("--web-auth")
     fi
 
     # Run analyze script and capture work directory from last line

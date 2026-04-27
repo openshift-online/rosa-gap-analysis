@@ -68,6 +68,7 @@ OPTIONS:
     -i, --job-id ID        Specific job ID to analyze (for older failed jobs)
     -w, --work-dir DIR     Work directory for artifacts (default: .tmp/gap-work/analysis-XXXXXX)
     -k, --keep-work-dir    Keep temporary work directory after completion
+    --web-auth            Authenticate via web browser if not logged in
     -h, --help            Display this help message
 
 EXAMPLES:
@@ -85,6 +86,9 @@ EXAMPLES:
 
     # Analyze different job
     $(basename "$0") -j periodic-ci-openshift-online-rosa-gap-analysis-main-candidate
+
+    # Authenticate via web browser if needed
+    $(basename "$0") --web-auth
 
 OUTPUT:
     Artifacts downloaded to work directory (printed at end):
@@ -133,12 +137,25 @@ check_prerequisites() {
         log_error "For gcloud: Install gcloud SDK from https://cloud.google.com/sdk/docs/install"
         exit 1
     fi
+}
 
-    # Validate authentication
+# Validate authentication
+validate_auth() {
+    local web_auth="$1"
+
     if ! oc whoami &> /dev/null; then
-        log_error "Not authenticated to OpenShift CI."
-        log_error "Please authenticate at: https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/display"
-        exit 1
+        if [ "$web_auth" = true ]; then
+            log_info "Not authenticated. Attempting web-based login..."
+            if ! oc login https://api.ci.l2s4.p1.openshiftapps.com:6443 --web; then
+                log_error "Web authentication failed."
+                exit 1
+            fi
+        else
+            log_error "Not authenticated to OpenShift CI."
+            log_error "Please authenticate at: https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/display"
+            log_error "Or use --web-auth to authenticate via web browser."
+            exit 1
+        fi
     fi
 
     log_info "Authenticated as: $(oc whoami)"
@@ -272,6 +289,7 @@ main() {
     local specific_job_id=""
     local work_dir=""
     local keep_work_dir=false
+    local web_auth=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -290,6 +308,10 @@ main() {
                 ;;
             -k|--keep-work-dir)
                 keep_work_dir=true
+                shift
+                ;;
+            --web-auth)
+                web_auth=true
                 shift
                 ;;
             -h|--help)
@@ -331,6 +353,7 @@ main() {
 
     # Check prerequisites
     check_prerequisites
+    validate_auth "$web_auth"
 
     local job_id=""
     local artifacts_downloaded=false

@@ -30,6 +30,7 @@ Trigger and monitor OpenShift CI Prow jobs via Gangway API.
 OPTIONS:
     -j, --job-name NAME    Job name to trigger (default: ${DEFAULT_JOB_NAME})
     -w, --wait            Wait and poll for job completion
+    --web-auth            Authenticate via web browser if not logged in
     -h, --help            Display this help message
 
 EXAMPLES:
@@ -41,6 +42,9 @@ EXAMPLES:
 
     # Trigger and wait for completion
     $(basename "$0") -w
+
+    # Authenticate via web browser if not logged in
+    $(basename "$0") --web-auth
 
 AUTHENTICATION:
     Before running, authenticate at:
@@ -87,10 +91,21 @@ check_prerequisites() {
 
 # Validate authentication
 validate_auth() {
+    local web_auth="$1"
+
     if ! oc whoami &> /dev/null; then
-        log_error "Not authenticated to OpenShift CI."
-        log_error "Please authenticate at: https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/display"
-        exit 1
+        if [ "$web_auth" = true ]; then
+            log_info "Not authenticated. Attempting web-based login..."
+            if ! oc login https://api.ci.l2s4.p1.openshiftapps.com:6443 --web; then
+                log_error "Web authentication failed."
+                exit 1
+            fi
+        else
+            log_error "Not authenticated to OpenShift CI."
+            log_error "Please authenticate at: https://oauth-openshift.apps.ci.l2s4.p1.openshiftapps.com/oauth/token/display"
+            log_error "Or use --web-auth to authenticate via web browser."
+            exit 1
+        fi
     fi
 
     local user
@@ -232,6 +247,7 @@ wait_for_job() {
 main() {
     local job_name="${DEFAULT_JOB_NAME}"
     local wait_for_completion=false
+    local web_auth=false
 
     # Parse arguments
     while [[ $# -gt 0 ]]; do
@@ -242,6 +258,10 @@ main() {
                 ;;
             -w|--wait)
                 wait_for_completion=true
+                shift
+                ;;
+            --web-auth)
+                web_auth=true
                 shift
                 ;;
             -h|--help)
@@ -258,7 +278,7 @@ main() {
 
     # Run prerequisite checks
     check_prerequisites
-    validate_auth
+    validate_auth "$web_auth"
 
     # Trigger the job
     local job_id

@@ -9,7 +9,6 @@ compatibility:
   required_tools:
     - python3
     - curl (for Sippy API access)
-    - PyYAML (for YAML processing)
 ---
 
 # Feature Gate Gap Analysis
@@ -28,11 +27,12 @@ Analyze differences in OpenShift feature gates between versions using the Sippy 
 
 1. Parse baseline and target versions (default: auto-detect latest stable → latest candidate)
 2. Fetch feature gate data from Sippy API for both versions
-3. Compare feature gates and identify:
+3. Compare **Hypershift-relevant** feature gates only (gates with `Default:Hypershift`, `DevPreviewNoUpgrade:Hypershift`, or `TechPreviewNoUpgrade:Hypershift` enablement) and identify:
    - New feature gates added in target version
    - Feature gates removed in target version
-   - Feature gates newly enabled by default in target
+   - Feature gates newly enabled by default (`Default:Hypershift`) in target
    - Feature gates removed from default in target
+   - Feature gates that continue as `Default:Hypershift` (already default, still default)
 4. Log detected differences and always exit 0 on successful execution
 
 ## Script Usage
@@ -96,10 +96,13 @@ reports/gap-analysis-feature-gates_4.21_to_4.22_20260325_120000.json  # JSON
 
 ## Key Focus Areas
 
-- **New Feature Gates**: Feature gates added in the target version
-- **Removed Feature Gates**: Feature gates dropped from the target version
-- **Default Enablement**: Gates newly enabled by default (important for upgrade planning)
-- **Removed from Default**: Gates that were default but are no longer
+Note: Only Hypershift-relevant gates are analyzed (gates with `Default:Hypershift`, `DevPreviewNoUpgrade:Hypershift`, or `TechPreviewNoUpgrade:Hypershift` enablement).
+
+- **New Feature Gates**: Hypershift-relevant gates added in the target version
+- **Removed Feature Gates**: Hypershift-relevant gates dropped from the target version
+- **Default Enablement**: Gates newly enabled by default (`Default:Hypershift`) - important for upgrade planning
+- **Removed from Default**: Gates that had `Default:Hypershift` in baseline but no longer do
+- **Continues as Default**: Gates that continue as `Default:Hypershift` from baseline to target
 
 ## Output
 
@@ -130,10 +133,11 @@ Exit code: `0` (successful execution, no differences)
 [INFO] Fetching feature gates for version 4.22...
 [SUCCESS] Fetched 130 feature gates for version 4.22
 [INFO] Comparing feature gates...
-[INFO] Feature gate differences detected:
+[INFO] Feature gate differences detected (Hypershift-relevant only):
 [INFO]   - New feature gates: 8
 [INFO]   - Removed feature gates: 3
-[INFO]   - Newly enabled by default: 2
+[INFO]   - Newly enabled by default (Default:Hypershift): 2
+[INFO]   - Continues as Default:Hypershift: 5
 ```
 
 Exit code: `0` (successful execution, differences found)

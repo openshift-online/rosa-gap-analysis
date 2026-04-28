@@ -146,7 +146,7 @@ from reporters import generate_html_report, generate_json_report
 
 **Container (ci/Containerfile):**
 - Base: UBI9
-- Includes: `oc` CLI, Python 3, PyYAML, curl, bash
+- Includes: `oc` CLI, Python 3, PyYAML, Jinja2, `jq`, `yq`, `gh`, curl, git, make, bash
 - Scripts pre-installed at `/gap-analysis/scripts/` and in PATH
 - Writable temp dirs (`/tmp/.cache`, `/tmp/gap-analysis-data`) for random UID support
 - Working directory: `/gap-analysis`

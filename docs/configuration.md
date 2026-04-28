@@ -148,7 +148,7 @@ Scripts query these endpoints for auto-detection:
 
 ```
 https://sippy.dptools.openshift.org/api/releases
-https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestream/{version}/latest
+https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted
 https://sippy.dptools.openshift.org/api/feature_gates?release={version}
 ```
 

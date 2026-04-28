@@ -2,7 +2,6 @@
 """Report generation utilities for gap analysis using Jinja2 templates."""
 
 import json
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any

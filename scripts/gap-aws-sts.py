@@ -9,9 +9,6 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from urllib.request import urlopen, Request
-from urllib.error import HTTPError, URLError
-
 # Add lib directory to path
 sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 

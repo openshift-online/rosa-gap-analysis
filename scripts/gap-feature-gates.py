@@ -3,6 +3,7 @@
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -327,5 +328,4 @@ Exit Codes:
 
 
 if __name__ == '__main__':
-    import os
     main()

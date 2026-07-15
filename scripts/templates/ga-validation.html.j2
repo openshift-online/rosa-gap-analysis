@@ -182,30 +182,31 @@
         </div>
         <div class="section-body">
 
-        {# ─── AWS Marketplace ─── #}
+        {# ─── Combined Marketplace Availability ─── #}
         {% if check_data.channels is defined and check_data.channels and check_data.channels.values()|first is mapping and 'rosa_classic' in check_data.channels.values()|first %}
         <table class="tbl">
-            <thead><tr><th>Channel</th><th style="text-align:center;">ROSA Classic</th><th style="text-align:center;">ROSA HCP</th></tr></thead>
+            <thead><tr><th>Channel</th><th style="text-align:center;">AWS (ROSA)</th><th style="text-align:center;">GCP Marketplace</th></tr></thead>
             <tbody>
             {% for chan, info in check_data.channels.items() %}
             <tr>
-                <td>{{ chan }}</td>
-                <td style="text-align:center;">{% if info.rosa_classic %}<span class="ok">&#10003;</span> <span style="font-family:monospace;font-size:.88em;">{{ info.rosa_classic_output }}</span>{% else %}<span class="no">&#10007;</span> <span style="color:var(--text-muted,#94a3b8);">—</span>{% endif %}</td>
-                <td style="text-align:center;">{% if info.rosa_hcp %}<span class="ok">&#10003;</span> <span style="font-family:monospace;font-size:.88em;">{{ info.rosa_hcp_output }}</span>{% else %}<span class="no">&#10007;</span> <span style="color:var(--text-muted,#94a3b8);">—</span>{% endif %}</td>
-            </tr>
-            {% endfor %}
-            </tbody>
-        </table>
-
-        {# ─── GCP Marketplace ─── #}
-        {% elif check_data.channels is defined and check_data.channels and check_data.channels.values()|first is mapping and 'gcp_marketplace' in check_data.channels.values()|first %}
-        <table class="tbl">
-            <thead><tr><th>Channel</th><th style="text-align:center;">GCP Marketplace</th></tr></thead>
-            <tbody>
-            {% for chan, info in check_data.channels.items() %}
-            <tr>
-                <td>{{ chan }}</td>
-                <td style="text-align:center;">{% if info.gcp_marketplace %}<span class="ok">&#10003;</span> <span style="font-family:monospace;font-size:.88em;">{{ info.gcp_marketplace_output }}</span>{% else %}<span class="no">&#10007;</span> <span style="color:var(--text-muted,#94a3b8);">—</span>{% endif %}</td>
+                <td><strong>{{ chan }}</strong></td>
+                <td style="text-align:center;">
+                    {% if info.rosa_classic or info.rosa_hcp %}
+                    <span class="ok">&#10003;</span>
+                    <span style="font-family:monospace;font-size:.88em;">{{ info.rosa_classic_output or info.rosa_hcp_output }}</span>
+                    {% if info.rosa_classic and info.rosa_hcp %}<br><span style="font-size:.8em;color:var(--text-muted,#94a3b8);">Classic + HCP</span>
+                    {% elif info.rosa_classic %}<br><span style="font-size:.8em;color:var(--text-muted,#94a3b8);">Classic only</span>
+                    {% else %}<br><span style="font-size:.8em;color:var(--text-muted,#94a3b8);">HCP only</span>
+                    {% endif %}
+                    {% else %}<span class="no">&#10007;</span> <span style="color:var(--text-muted,#94a3b8);">Not available</span>
+                    {% endif %}
+                </td>
+                <td style="text-align:center;">
+                    {% if info.gcp_marketplace %}<span class="ok">&#10003;</span> <span style="font-family:monospace;font-size:.88em;">{{ info.gcp_marketplace_output }}</span>
+                    {% elif info.gcp_marketplace is not defined %}<span style="color:var(--text-muted,#94a3b8);">N/A</span>
+                    {% else %}<span class="no">&#10007;</span> <span style="color:var(--text-muted,#94a3b8);">Not available</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
             </tbody>

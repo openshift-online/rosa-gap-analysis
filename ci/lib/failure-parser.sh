@@ -93,7 +93,7 @@ generate_aws_sts_missing_files() {
     local target_minor
 
     # Extract minor version (4.22.0-ec.4 -> 4.22)
-    target_minor=$(echo "${target_version}" | grep -oP '^\d+\.\d+')
+    target_minor=$(echo "${target_version}" | grep -oE '^[0-9]+\.[0-9]+')
 
     local resources_failed
     local admin_ack_failed
@@ -126,7 +126,7 @@ generate_gcp_wif_missing_files() {
     local target_minor
 
     # Extract minor version
-    target_minor=$(echo "${target_version}" | grep -oP '^\d+\.\d+')
+    target_minor=$(echo "${target_version}" | grep -oE '^[0-9]+\.[0-9]+')
 
     local resources_failed
     local admin_ack_failed
@@ -159,7 +159,7 @@ generate_ocp_gate_missing_files() {
     local target_minor
 
     # Extract minor version
-    target_minor=$(echo "${target_version}" | grep -oP '^\d+\.\d+')
+    target_minor=$(echo "${target_version}" | grep -oE '^[0-9]+\.[0-9]+')
 
     local config_failed
     config_failed=$(echo "${failures}" | jq -r '.validation_failed')
@@ -194,7 +194,7 @@ generate_failure_summary() {
     target=$(jq -r '.target' "${report_path}")
 
     local target_minor
-    target_minor=$(echo "${target}" | grep -oP '^\d+\.\d+')
+    target_minor=$(echo "${target}" | grep -oE '^[0-9]+\.[0-9]+')
 
     # Extract failures
     local aws_failures gcp_failures ocp_failures

@@ -266,7 +266,7 @@ parse_args() {
 # Find latest report if not specified
 find_latest_report() {
     if [ -z "${REPORT_FILE}" ]; then
-        REPORT_FILE=$(find "${WORK_DIR}" -name "gap-analysis-full_*.json" -type f -printf '%T@ %p\n' | sort -rn | head -1 | cut -d' ' -f2)
+        REPORT_FILE=$( (find "${WORK_DIR}" -name "gap-analysis-full_*.json" -type f -exec stat -f '%m %N' {} + 2>/dev/null || find "${WORK_DIR}" -name "gap-analysis-full_*.json" -type f -printf '%T@ %p\n') | sort -rn | head -1 | cut -d' ' -f2)
 
         if [ -z "${REPORT_FILE}" ]; then
             log_error "No gap-analysis report found in ${WORK_DIR}"
@@ -805,7 +805,7 @@ create_pr() {
 
     # Extract version information from report
     local version baseline_version target_version
-    version=$(jq -r '.target' "${REPORT_FILE}" | grep -oP '^\d+\.\d+')
+    version=$(jq -r '.target' "${REPORT_FILE}" | grep -oE '^[0-9]+\.[0-9]+')
     baseline_version=$(jq -r '.baseline' "${REPORT_FILE}" 2>/dev/null || echo "unknown")
     target_version=$(jq -r '.target' "${REPORT_FILE}" 2>/dev/null || echo "${version}")
 
@@ -825,7 +825,7 @@ create_pr() {
     # Get exact HTML report filename from work directory
     local html_report_filename=""
     if [ -n "${prow_job_id}" ]; then
-        html_report_filename=$(find "${WORK_DIR}" -name "gap-analysis-full_${baseline_version}_to_${target_version}_*.html" -type f -printf '%f\n' | head -1 || echo "")
+        html_report_filename=$(find "${WORK_DIR}" -name "gap-analysis-full_${baseline_version}_to_${target_version}_*.html" -type f | head -1 | xargs -I{} basename {} 2>/dev/null || echo "")
     fi
 
     # Construct Prow job URL and HTML report URL

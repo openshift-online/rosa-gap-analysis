@@ -25,7 +25,7 @@ get_job_executions() {
     # Fetch job-history page and extract allBuilds JavaScript array
     local all_builds
     all_builds=$(curl -s "${PROW_URL}/job-history/gs/test-platform-results/logs/${job_name}" | \
-        grep -oP 'var allBuilds = \K\[.*?\];' | sed 's/;$//')
+        sed -n 's/.*var allBuilds = \(\[.*\]\);.*/\1/p')
 
     if [ -z "${all_builds}" ]; then
         echo '{"items":[]}'
@@ -47,7 +47,7 @@ get_job_execution() {
     # Fetch job-history page and extract allBuilds JavaScript array
     local all_builds
     all_builds=$(curl -s "${PROW_URL}/job-history/gs/test-platform-results/logs/${job_name}" | \
-        grep -oP 'var allBuilds = \K\[.*?\];' | sed 's/;$//')
+        sed -n 's/.*var allBuilds = \(\[.*\]\);.*/\1/p')
 
     if [ -z "${all_builds}" ]; then
         echo '{"id":null,"job_status":null,"start_time":null,"completion_time":null,"duration":null}'

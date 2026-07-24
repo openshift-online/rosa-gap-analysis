@@ -78,6 +78,8 @@ def generate_html_report(data: Dict[str, Any], output_file: str = None) -> str:
         template = jinja_env.get_template('ga-validation.html.j2')
     elif 'OCM Version Gate' in report_type:
         template = jinja_env.get_template('ocm-version-gate.html.j2')
+    elif 'Cluster Installation' in report_type:
+        template = jinja_env.get_template('cluster-install.html.j2')
     elif 'Full Gap Analysis' in report_type or 'Aggregated Gap Analysis' in report_type:
         template = jinja_env.get_template('full-gap.html.j2')
     else:

@@ -98,6 +98,38 @@ firefox reports/gap-analysis-full_*.html
 jq '.aws_sts.comparison' reports/gap-analysis-full_*.json
 ```
 
+### Cluster Installation Validation
+
+End-to-end cluster installation and validation workflow for ROSA Classic and HCP:
+
+```bash
+# ROSA Classic cluster validation
+python3 scripts/gap-cluster-install-validation.py \
+  --topology classic \
+  --version 4.20.28 \
+  --region us-east-1 \
+  --channel-group stable
+
+# ROSA HCP cluster validation
+python3 scripts/gap-cluster-install-validation.py \
+  --topology hcp \
+  --version 4.20.28 \
+  --region us-east-1 \
+  --channel-group stable \
+  --billing-account <BILLING_ACCOUNT_ID>
+```
+
+**What it does:**
+1. Creates cluster (Classic: account-roles + cluster; HCP: VPC + account-roles + OIDC + operator-roles + cluster)
+2. Watches installation progress
+3. Waits for cluster ready state
+4. Logs in using OCM credentials API (retries 5 times with 3-minute intervals)
+5. Runs ClusterOperator and Node validations
+6. Generates HTML and JSON reports
+7. **Always** deletes cluster and cleanup resources (account-roles, VPC, etc.)
+
+**Note:** Cluster and resources are always deleted after report generation, regardless of validation success or failure.
+
 ## Quick Reference
 
 ### Version Queries (Accepted Builds)

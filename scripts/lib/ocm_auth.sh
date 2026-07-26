@@ -10,6 +10,7 @@ ocm_authenticate() {
     if [[ -n "${OCM_URL:-}" ]]; then
         url_args+=(--url "${OCM_URL}")
         log_info "OCM environment: ${OCM_URL}"
+        unset OCM_URL
     fi
 
     if [[ -n "${OCM_TOKEN:-}" ]]; then

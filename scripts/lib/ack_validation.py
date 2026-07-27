@@ -72,9 +72,14 @@ def calculate_expected_baseline(target_version):
     minor_part = parts[1].split('-')[0]  # Handle "21" from "4.21.0-ec.3"
     minor = int(minor_part)
 
-    # Calculate baseline (subtract 1 from minor)
-    baseline_minor = minor - 1
+    # Check for special baseline mappings (e.g., 5.0 -> 4.22, 5.1 -> 4.23)
+    from openshift_releases import get_special_baseline_mapping
+    target_minor = f"{major}.{minor}"
+    special_baseline = get_special_baseline_mapping(target_minor)
+    if special_baseline:
+        return special_baseline
 
+    baseline_minor = minor - 1
     return f"{major}.{baseline_minor}"
 
 

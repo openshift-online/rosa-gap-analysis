@@ -121,7 +121,7 @@ UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):
 - All policy files are valid JSON with required structure
 - Policy changes match OCP release credential request changes using **per-file comparison**
 - Per-file comparison aggregates all permission changes across individual CredentialRequest files (a permission can be new to one CR but already exist in another)
-- No unexpected files added or removed
+- New policy files (e.g. for a new CredentialsRequest) are reported as WARNINGS; removed policy files are ERRORS
 - Actions (permissions) in managed-cluster-config match OCP release per-file changes
 
 **Files checked:**
@@ -131,7 +131,8 @@ UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):
 **Pass criteria:**
 - All policy files exist and are valid JSON
 - Policy changes match OCP release changes exactly (ERRORS cause failure)
-- Unexpected permissions generate WARNINGS but do not fail validation
+- Unexpected permissions and newly added policy files generate WARNINGS but do not fail validation
+- Removed policy files fail validation
 
 ### Check 2: AWS STS Admin Ack
 

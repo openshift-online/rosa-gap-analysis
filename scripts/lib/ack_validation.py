@@ -442,6 +442,8 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
     import os
 
     errors = []
+    warnings = []
+    warnings_structured = []  # Structured data for table rendering
     file_results = {}
     baseline_mcc_dir = None
     target_mcc_dir = None
@@ -471,15 +473,18 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
             'changed_files_count': 0
         }
 
-    # Check for files added or removed between versions
+    # Check for files added or removed between versions.
+    # New policy files are expected when OCP adds CredentialsRequests (e.g. Karpenter);
+    # treat as warnings. Permission MISMATCH checks below remain the FAIL criteria.
+    # Removed policy files stay errors — accidental deletion is not caught by action diffs.
     files_added = target_files - baseline_files
     files_removed = baseline_files - target_files
 
     if files_added:
         added_files_list = ', '.join(sorted(files_added))
         target_dir_url = f"{MCC_TREE_BASE_URL}/resources/sts/{target_version}"
-        errors.append(f"Files added in managed-cluster-config: {added_files_list}")
-        errors.append(f"  Location: {target_dir_url}")
+        warnings.append(f"Files added in managed-cluster-config: {added_files_list}")
+        warnings.append(f"  Location: {target_dir_url}")
     if files_removed:
         removed_files_list = ', '.join(sorted(files_removed))
         baseline_dir_url = f"{MCC_TREE_BASE_URL}/resources/sts/{baseline_version}"
@@ -583,10 +588,6 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
                 'diff': file_result.get('diff', {}),
                 'exists_in_baseline': file_result.get('exists_in_baseline', False)
             })
-
-    # Initialize warnings list (separate from errors)
-    warnings = []
-    warnings_structured = []  # Structured data for table rendering
 
     # If expected_changes provided, validate that managed-cluster-config changes match OCP release changes
     if expected_changes:

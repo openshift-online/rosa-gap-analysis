@@ -285,7 +285,7 @@
                 <tbody>
                     {% for item in validation_details.check_1_resources.warnings_structured %}
                     <tr style="{% if loop.index % 2 == 0 %}background-color: #fff8e1;{% endif %}">
-                        <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold; {% if item.type == 'Added' %}color: #2e7d32;{% else %}color: #c62828;{% endif %}">{{ item.type }}</td>
+                        <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold; {% if item.type in ('Added', 'File Added') %}color: #2e7d32;{% else %}color: #c62828;{% endif %}">{{ item.type }}</td>
                         <td style="padding: 8px; border: 1px solid #ddd; font-family: monospace;">{{ item.action }}</td>
                         <td style="padding: 8px; border: 1px solid #ddd;">
                             {% if item.pr_url %}

@@ -132,6 +132,7 @@ UNEXPECTED: Actions added in managed-cluster-config (not in OCP release):
 - All policy files exist and are valid JSON
 - Policy changes match OCP release changes exactly (ERRORS cause failure)
 - Unexpected permissions and newly added policy files generate WARNINGS but do not fail validation
+- Newly added policy file warnings include the MCC PR that introduced the file when resolvable
 - Removed policy files fail validation
 
 ### Check 2: AWS STS Admin Ack

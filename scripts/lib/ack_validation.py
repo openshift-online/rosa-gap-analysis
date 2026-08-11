@@ -320,79 +320,6 @@ def validate_cloudcredential_yaml(cc_data, target_version):
     return (is_valid, errors, actual_version)
 
 
-def _github_api_headers():
-    """Build GitHub API headers, adding auth when GH_TOKEN/GITHUB_TOKEN is set."""
-    import os
-    headers = {
-        'Accept': 'application/vnd.github.v3+json',
-        'User-Agent': 'gap-analysis-script',
-    }
-    gh_token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
-    if gh_token:
-        headers['Authorization'] = f'token {gh_token}'
-    return headers
-
-
-def find_pr_for_file_addition(file_path):
-    """
-    Find the PR that added a file in managed-cluster-config via the commits API.
-
-    More accurate than title search for brand-new policy files.
-
-    Args:
-        file_path: Relative path (e.g., "resources/sts/5.0/openshift_karpenter_cloud_credentials_policy.json")
-
-    Returns:
-        Tuple of (pr_url, pr_number) or (None, None) if not found
-    """
-    from urllib.parse import quote
-
-    try:
-        commits_url = (
-            'https://api.github.com/repos/openshift/managed-cluster-config/commits'
-            f'?path={quote(file_path)}&per_page=5'
-        )
-        req = Request(commits_url, headers=_github_api_headers())
-        with urlopen(req, timeout=10) as response:
-            commits = json.loads(response.read().decode('utf-8'))
-
-        if not isinstance(commits, list) or not commits:
-            return (None, None)
-
-        # Walk recent commits for this path until one is linked to a merged PR
-        for commit in commits:
-            sha = commit.get('sha')
-            if not sha:
-                continue
-            pulls_url = (
-                f'https://api.github.com/repos/openshift/managed-cluster-config/'
-                f'commits/{sha}/pulls'
-            )
-            pull_headers = _github_api_headers()
-            # Commits-list-pulls needs the special media type
-            pull_headers['Accept'] = 'application/vnd.github.groot-preview+json'
-            pull_req = Request(pulls_url, headers=pull_headers)
-            with urlopen(pull_req, timeout=10) as pull_response:
-                pulls = json.loads(pull_response.read().decode('utf-8'))
-            if not isinstance(pulls, list):
-                continue
-            for pr in pulls:
-                if pr.get('merged_at') or pr.get('state') == 'closed':
-                    html_url = pr.get('html_url')
-                    number = pr.get('number')
-                    if html_url and number:
-                        return (html_url, number)
-                # Prefer any associated PR if merge metadata is unavailable
-                html_url = pr.get('html_url')
-                number = pr.get('number')
-                if html_url and number:
-                    return (html_url, number)
-    except (HTTPError, URLError, json.JSONDecodeError, KeyError, Exception):
-        pass
-
-    return (None, None)
-
-
 def find_pr_for_file_change(file_path, target_version, changed_actions):
     """
     Find the PR that introduced changes to a specific file in managed-cluster-config.
@@ -409,6 +336,8 @@ def find_pr_for_file_change(file_path, target_version, changed_actions):
         Tuple of (pr_url, pr_number) or (None, None) if not found
     """
     import os
+    from urllib.request import Request
+    from urllib.error import HTTPError, URLError
     from urllib.parse import quote_plus
 
     try:
@@ -418,7 +347,13 @@ def find_pr_for_file_change(file_path, target_version, changed_actions):
         query = f'{target_version} in:title repo:openshift/managed-cluster-config is:pr is:merged'
         api_url = f'https://api.github.com/search/issues?q={quote_plus(query)}&sort=updated&order=desc&per_page=20'
 
-        req = Request(api_url, headers=_github_api_headers())
+        # Add authentication if GH_TOKEN is available
+        headers = {'Accept': 'application/vnd.github.v3+json'}
+        gh_token = os.environ.get('GH_TOKEN') or os.environ.get('GITHUB_TOKEN')
+        if gh_token:
+            headers['Authorization'] = f'token {gh_token}'
+
+        req = Request(api_url, headers=headers)
         response = urlopen(req, timeout=10)
         data = json.loads(response.read().decode('utf-8'))
 
@@ -426,21 +361,12 @@ def find_pr_for_file_change(file_path, target_version, changed_actions):
         if not items:
             return (None, None)
 
-        # Prefer PRs that mention the filename (or a distinctive stem) in the title
+        # Look for PR that mentions the version in title
         filename = file_path.split('/')[-1]
-        filename_stem = filename.replace('_policy.json', '').replace('.json', '').replace('_', ' ')
         for item in items:
             title = item.get('title', '').lower()
-            if filename.lower() in title or any(
-                part and len(part) > 4 and part in title
-                for part in filename_stem.lower().split()
-            ):
-                return (item['html_url'], item['number'])
-
-        # Fall back: PR that mentions the version in title
-        for item in items:
-            title = item.get('title', '').lower()
-            if target_version in title:
+            # Check if this PR mentions the version or file in title
+            if target_version in title or filename in title:
                 return (item['html_url'], item['number'])
 
         # If no specific match, return the most recently updated PR with the version number
@@ -559,10 +485,7 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
         warnings.append("Files added in managed-cluster-config:")
         for filename in sorted(files_added):
             file_path = f"resources/sts/{target_version}/{filename}"
-            # Prefer commits API (accurate for new files); fall back to title search
-            pr_url, pr_number = find_pr_for_file_addition(file_path)
-            if not pr_url:
-                pr_url, pr_number = find_pr_for_file_change(file_path, target_version, [])
+            pr_url, pr_number = find_pr_for_file_change(file_path, target_version, [])
             if pr_url:
                 # Format: filename (MCC PR #123 @ URL) - matches unexpected-action warning style
                 warnings.append(f"  • {filename} (MCC PR #{pr_number} @ {pr_url})")

@@ -442,6 +442,8 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
     import os
 
     errors = []
+    warnings = []
+    warnings_structured = []  # Structured data for table rendering
     file_results = {}
     baseline_mcc_dir = None
     target_mcc_dir = None
@@ -471,15 +473,31 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
             'changed_files_count': 0
         }
 
-    # Check for files added or removed between versions
+    # Check for files added or removed between versions.
+    # New policy files are expected when OCP adds CredentialsRequests (e.g. Karpenter);
+    # treat as warnings. Permission MISMATCH checks below remain the FAIL criteria.
+    # Removed policy files stay errors — accidental deletion is not caught by action diffs.
     files_added = target_files - baseline_files
     files_removed = baseline_files - target_files
 
     if files_added:
-        added_files_list = ', '.join(sorted(files_added))
         target_dir_url = f"{MCC_TREE_BASE_URL}/resources/sts/{target_version}"
-        errors.append(f"Files added in managed-cluster-config: {added_files_list}")
-        errors.append(f"  Location: {target_dir_url}")
+        warnings.append("Files added in managed-cluster-config:")
+        for filename in sorted(files_added):
+            file_path = f"resources/sts/{target_version}/{filename}"
+            pr_url, pr_number = find_pr_for_file_change(file_path, target_version, [])
+            if pr_url:
+                # Format: filename (MCC PR #123 @ URL) - matches unexpected-action warning style
+                warnings.append(f"  • {filename} (MCC PR #{pr_number} @ {pr_url})")
+            else:
+                warnings.append(f"  • {filename}")
+            warnings_structured.append({
+                'type': 'File Added',
+                'action': filename,
+                'pr_number': pr_number,
+                'pr_url': pr_url
+            })
+        warnings.append(f"  Location: {target_dir_url}")
     if files_removed:
         removed_files_list = ', '.join(sorted(files_removed))
         baseline_dir_url = f"{MCC_TREE_BASE_URL}/resources/sts/{baseline_version}"
@@ -583,10 +601,6 @@ def validate_sts_resources(baseline_version, target_version, expected_changes=No
                 'diff': file_result.get('diff', {}),
                 'exists_in_baseline': file_result.get('exists_in_baseline', False)
             })
-
-    # Initialize warnings list (separate from errors)
-    warnings = []
-    warnings_structured = []  # Structured data for table rendering
 
     # If expected_changes provided, validate that managed-cluster-config changes match OCP release changes
     if expected_changes:

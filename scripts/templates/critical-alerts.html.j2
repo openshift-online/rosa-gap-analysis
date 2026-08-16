@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ type }} Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; }
+        h1 { color: #333; border-bottom: 3px solid #0066cc; padding-bottom: 10px; }
+        h2 { color: #444; margin-top: 30px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
+        h3 { color: #555; margin-top: 20px; }
+        .metadata { background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; vertical-align: top; }
+        th { background-color: #0066cc; color: white; font-weight: 600; }
+        code { background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; word-break: break-all; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8em; font-weight: 600; }
+        .badge-inherit { background-color: #d4edda; color: #155724; }
+        .badge-silence { background-color: #fff3cd; color: #856404; }
+        .badge-review { background-color: #f8d7da; color: #721c24; }
+        .badge-high { background-color: #f8d7da; color: #721c24; }
+        .badge-medium { background-color: #fff3cd; color: #856404; }
+        .badge-low { background-color: #d1ecf1; color: #0c5460; }
+        .skip { background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .note { background-color: #f8f9fa; padding: 12px; border-radius: 5px; color: #555; font-size: 0.9em; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ type }} Report</h1>
+        <div class="metadata">
+            <p><strong>Generated:</strong> {{ timestamp }}</p>
+            <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code></p>
+            <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
+            <p><strong>Source:</strong> Critical Alerts snapshots from Prow GCS</p>
+            <p><strong>Result:</strong> {{ validation_result }} (informational)</p>
+        </div>
+        <p class="note">{{ note }}</p>
+        {% include '_topology_coverage.html.j2' %}
+
+        <h2>Summary</h2>
+        <table style="width: 70%;">
+            <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+            <tbody>
+                <tr><td>New critical alerts</td><td style="text-align: center;">{{ summary.new_critical }}</td></tr>
+                <tr><td>New non-critical alerts</td><td style="text-align: center;">{{ summary.new_other }}</td></tr>
+                <tr><td>Removed alerts</td><td style="text-align: center;">{{ summary.removed }}</td></tr>
+                <tr><td>Modified alerts</td><td style="text-align: center;">{{ summary.modified }}</td></tr>
+                <tr><td>Recommend inherit</td><td style="text-align: center;">{{ summary.inherit }}</td></tr>
+                <tr><td>Recommend silence</td><td style="text-align: center;">{{ summary.silence }}</td></tr>
+                <tr><td>Require review</td><td style="text-align: center;">{{ summary.review }}</td></tr>
+            </tbody>
+        </table>
+
+        {% for topo in topologies %}
+        <h2>{{ topo.display_name or (topo.topology | upper) }}</h2>
+        {% if topo.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.skip_reason }}</div>
+        {% else %}
+        <p>
+            Baseline ({{ topo.baseline.cluster_role or topo.baseline_topology or topo.topology }}):
+            <code>{{ topo.baseline.cluster_version or topo.baseline.openshift_version }}</code>
+            {% if topo.baseline.gcs_url %}(<a href="{{ topo.baseline.gcs_url }}">snapshot</a>){% endif %}
+            → Target ({{ topo.target.cluster_role or topo.target_topology or topo.topology }}):
+            <code>{{ topo.target.cluster_version or topo.target.openshift_version }}</code>
+            {% if topo.target.gcs_url %}(<a href="{{ topo.target.gcs_url }}">snapshot</a>){% endif %}
+        </p>
+
+        {% if topo.comparison.inherit %}
+        <h3>New alerts that should be inherited</h3>
+        <table>
+            <thead><tr><th>Alert</th><th>Namespace</th><th>Severity</th><th>For</th><th>Predicted frequency</th><th>Runbook</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.inherit %}
+                <tr>
+                    <td><code>{{ item.alert }}</code></td>
+                    <td>{{ item.namespace }}</td>
+                    <td>{{ item.severity }}</td>
+                    <td>{{ item.for or '—' }}</td>
+                    <td><span class="badge badge-{{ item.predicted_frequency }}">{{ item.predicted_frequency }}</span></td>
+                    <td>{% if item.runbook_url %}<a href="{{ item.runbook_url }}">runbook</a>{% else %}—{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.silence %}
+        <h3>New alerts that should be silenced</h3>
+        <table>
+            <thead><tr><th>Alert</th><th>Namespace</th><th>Severity</th><th>For</th><th>Predicted frequency</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.silence %}
+                <tr>
+                    <td><code>{{ item.alert }}</code></td>
+                    <td>{{ item.namespace }}</td>
+                    <td>{{ item.severity }}</td>
+                    <td>{{ item.for or '—' }}</td>
+                    <td><span class="badge badge-{{ item.predicted_frequency }}">{{ item.predicted_frequency }}</span></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.modified %}
+        <h3>Modified alerts requiring review</h3>
+        <table>
+            <thead><tr><th>Alert</th><th>Changed</th><th>Severity</th><th>For</th><th>Predicted frequency</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.modified %}
+                <tr>
+                    <td><code>{{ item.alert }}</code><br><small>{{ item.namespace }}</small></td>
+                    <td>{{ (item.changed_fields or []) | join(', ') }}</td>
+                    <td>{{ item.baseline_severity }} → {{ item.severity }}</td>
+                    <td>{{ item.baseline_for or '—' }} → {{ item.for or '—' }}</td>
+                    <td><span class="badge badge-{{ item.predicted_frequency }}">{{ item.predicted_frequency }}</span></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.new_critical %}
+        <h3>New critical-level alerts</h3>
+        <table>
+            <thead><tr><th>Alert</th><th>Namespace</th><th>Recommendation</th><th>Predicted frequency</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.new_critical %}
+                <tr>
+                    <td><code>{{ item.alert }}</code></td>
+                    <td>{{ item.namespace }}</td>
+                    <td><span class="badge badge-{{ item.recommendation }}">{{ item.recommendation }}</span></td>
+                    <td><span class="badge badge-{{ item.predicted_frequency }}">{{ item.predicted_frequency }}</span></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.new_other %}
+        <h3>New non-critical alerts</h3>
+        <table>
+            <thead><tr><th>Alert</th><th>Namespace</th><th>Severity</th><th>Recommendation</th><th>Predicted frequency</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.new_other %}
+                <tr>
+                    <td><code>{{ item.alert }}</code></td>
+                    <td>{{ item.namespace }}</td>
+                    <td>{{ item.severity }}</td>
+                    <td><span class="badge badge-{{ item.recommendation }}">{{ item.recommendation }}</span></td>
+                    <td><span class="badge badge-{{ item.predicted_frequency }}">{{ item.predicted_frequency }}</span></td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.removed %}
+        <h3>Removed alerts</h3>
+        <table>
+            <thead><tr><th>Alert</th><th>Namespace</th><th>Severity</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.removed %}
+                <tr>
+                    <td><code>{{ item.alert }}</code></td>
+                    <td>{{ item.namespace }}</td>
+                    <td>{{ item.severity }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if not (topo.comparison.inherit or topo.comparison.silence or topo.comparison.modified or topo.comparison.new_critical or topo.comparison.new_other or topo.comparison.removed) %}
+        <p><em>No alert differences for this topology.</em></p>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+
+        <div class="footer">
+            Generated by <a href="https://github.com/openshift-online/rosa-gap-analysis" target="_blank">ROSA Gap Analysis</a>
+        </div>
+    </div>
+</body>
+</html>

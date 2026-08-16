@@ -137,17 +137,21 @@ I've detected a new gap script. Let me orchestrate all the related changes.
 
 ## Version 5.x Platform Rules
 
-OpenShift 5.x is **AWS/STS-only** — all GCP/WIF checks must be skipped for 5.x+ targets.
+OpenShift 5.x is **AWS/STS-only** — all GCP/WIF checks must be skipped for 5.x+ versions. Checks #9–#12 use `--topology hcp`, `--topology classic`, and `--topology osd-gcp`; each topology is compared to itself. OSD GCP snapshots/JUnit are skipped when either compared minor is 5.x (5.x has no OSD GCP jobs). Missing snapshots/JUnit are SKIP. Treat 5.0 as another OpenShift version with those conditions.
 
 **Detection:** Use `is_version_5x(minor_version)` from `scripts/lib/common.py`. Returns `True` when major version ≥ 5.
 
-**Per-version skip:** OSD GCP skip is applied per-version, not globally. For a 4.22 → 5.0 upgrade, baseline 4.22 still gets OSD GCP checked; only target 5.0 is skipped. Use `skip_gcp_baseline` and `skip_gcp_target` separately — never a single `skip_gcp` flag.
+**Marketplace per-version skip:** GCP marketplace/WIF skip is applied per-version, not globally. For a 4.22 → 5.0 upgrade, baseline 4.22 still gets GCP marketplace/WIF checked; only the 5.0 side is skipped. Use `skip_gcp_baseline` and `skip_gcp_target` separately — never a single `skip_gcp` flag. Snapshot Checks #9–#12 are different: OSD GCP is skipped for the whole comparison when any compared minor is 5.x.
 
 | Script | Guard Pattern | What's Skipped |
 |--------|--------------|----------------|
 | `gap-gcp-wif.py` | Early exit block (same pattern as `< 4.16` skip) with dummy PASS/SKIP report | All GCP WIF validation |
 | `gap-ocm-version-gate.py` | `skipped_labels` set excludes `api.openshift.com/gate-wif` for `target_minor.startswith("5.")` | WIF gate comparison |
 | `gap-versions-channels.py` | `skip_gcp_baseline` / `skip_gcp_target` per-version flags passed to `analyze_marketplace_availability()` | GCP marketplace data for each 5.x version individually |
+| `gap-api-resources.py` | HCP vs HCP (hosted + management when present), Classic vs Classic, OSD GCP vs OSD GCP | Missing snapshot; OSD GCP on 5.x |
+| `gap-critical-alerts.py` | Same as Check #9 | Missing snapshot; OSD GCP on 5.x |
+| `gap-cluster-install.py` | Same as Check #9 | Missing snapshot; OSD GCP on 5.x |
+| `gap-e2e-validation.py` | Target-only HCP, Classic, and OSD GCP JUnit | Missing target JUnit; OSD GCP on 5.x |
 | `gap-ga-validation.py` | `_skip_gcp` flag: GCP handled within combined `check_marketplace_availability()`; excludes `check_gcp_wif_compatibility` from `all_checks` | GCP marketplace (via `_skip_gcp` in combined check) + WIF template checks |
 
 **When adding a new gap script with GCP/WIF checks:** Add a 5.x guard using `is_version_5x()` and document it in this table.

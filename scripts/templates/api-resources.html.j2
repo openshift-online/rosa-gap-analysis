@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ type }} Report</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background-color: white;
+            padding: 30px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #333;
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 10px;
+        }
+        h2 {
+            color: #444;
+            margin-top: 30px;
+            border-bottom: 2px solid #e0e0e0;
+            padding-bottom: 8px;
+        }
+        h3 { color: #555; margin-top: 20px; }
+        .metadata {
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 5px;
+            margin: 20px 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #0066cc;
+            color: white;
+            font-weight: 600;
+        }
+        .added { color: #4caf50; font-weight: 500; }
+        .removed { color: #f44336; font-weight: 500; }
+        .changed { color: #ff9800; font-weight: 500; }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+        }
+        .badge-managed { background-color: #fff3cd; color: #856404; }
+        .skip {
+            background-color: #d1ecf1;
+            border-left: 4px solid #0c5460;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 5px;
+        }
+        .footer {
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            text-align: center;
+            color: #666;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ type }} Report</h1>
+        <div class="metadata">
+            <p><strong>Generated:</strong> {{ timestamp }}</p>
+            <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code></p>
+            <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
+            <p><strong>Source:</strong> API Resources and CRD snapshots from Prow GCS</p>
+            <p><strong>Result:</strong> {{ validation_result }} (informational)</p>
+        </div>
+        {% if note %}<p>{{ note }}</p>{% endif %}
+        {% include '_topology_coverage.html.j2' %}
+
+        <h2>Summary</h2>
+        <table style="width: 70%;">
+            <thead>
+                <tr><th>Metric</th><th style="text-align: center;">Count</th></tr>
+            </thead>
+            <tbody>
+                <tr><td>New API resources</td><td style="text-align: center;">{{ summary.new_api_resources }}</td></tr>
+                <tr><td>Removed API resources</td><td style="text-align: center;">{{ summary.removed_api_resources }}</td></tr>
+                <tr><td>API version changes</td><td style="text-align: center;">{{ summary.api_version_changes }}</td></tr>
+                <tr><td>New CRDs</td><td style="text-align: center;">{{ summary.new_crds }}</td></tr>
+                <tr><td>Removed CRDs</td><td style="text-align: center;">{{ summary.removed_crds }}</td></tr>
+                <tr><td>CRD version changes</td><td style="text-align: center;">{{ summary.crd_version_changes }}</td></tr>
+                <tr><td>Newly deprecated CRD versions</td><td style="text-align: center;">{{ summary.deprecated_crds }}</td></tr>
+                <tr><td>Managed-service new CRDs</td><td style="text-align: center;">{{ summary.managed_new_crds }}</td></tr>
+                <tr><td>Managed-service deprecated CRDs</td><td style="text-align: center;">{{ summary.managed_deprecated_crds }}</td></tr>
+            </tbody>
+        </table>
+
+        {% for topo in topologies %}
+        <h2>{{ topo.display_name or (topo.topology | upper) }}</h2>
+        {% if topo.status == 'SKIP' %}
+        <div class="skip">
+            <strong>Skipped:</strong> {{ topo.skip_reason }}
+        </div>
+        {% else %}
+        <p>
+            Baseline ({{ topo.baseline.cluster_role or topo.baseline_topology or topo.topology }}):
+            <code>{{ topo.baseline.cluster_version or topo.baseline.openshift_version }}</code>
+            {% if topo.baseline.gcs_url %}(<a href="{{ topo.baseline.gcs_url }}">snapshot</a>){% endif %}
+            → Target ({{ topo.target.cluster_role or topo.target_topology or topo.topology }}):
+            <code>{{ topo.target.cluster_version or topo.target.openshift_version }}</code>
+            {% if topo.target.gcs_url %}(<a href="{{ topo.target.gcs_url }}">snapshot</a>){% endif %}
+            {% if topo.target.job_name and topo.target.job_name != 'local' %}
+            | <code>{{ topo.target.job_name }}</code>
+            {% endif %}
+        </p>
+
+        {% if not (topo.comparison.new_api_resources or topo.comparison.removed_api_resources or topo.comparison.api_version_changes or topo.comparison.new_crds or topo.comparison.removed_crds or topo.comparison.crd_version_changes or topo.comparison.deprecated_crds) %}
+        <p><em>No API or CRD differences for this topology.</em></p>
+        {% endif %}
+
+        {% if topo.comparison.new_api_resources %}
+        <h3>New API resources</h3>
+        <table>
+            <thead><tr><th>Resource</th><th>Kind</th><th>Version</th><th>Namespaced</th><th></th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.new_api_resources %}
+                <tr>
+                    <td><code>{{ item.id }}</code></td>
+                    <td>{{ item.kind }}</td>
+                    <td>{{ item.version }}</td>
+                    <td>{{ item.namespaced }}</td>
+                    <td>{% if item.managed_service %}<span class="badge badge-managed">managed</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.new_crds %}
+        <h3>New CRDs</h3>
+        <table>
+            <thead><tr><th>CRD</th><th>Purpose</th><th>Storage version</th><th></th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.new_crds %}
+                <tr>
+                    <td><code>{{ item.name }}</code></td>
+                    <td>{{ item.purpose }}</td>
+                    <td>{{ item.storage_version }}</td>
+                    <td>{% if item.managed_service %}<span class="badge badge-managed">managed</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.api_version_changes %}
+        <h3>API version changes</h3>
+        <table>
+            <thead><tr><th>Resource</th><th>Baseline versions</th><th>Target versions</th><th>Preferred</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.api_version_changes %}
+                <tr>
+                    <td><code>{{ item.id }}</code> {{ item.kind }}</td>
+                    <td>{{ item.baseline_versions | join(', ') }}</td>
+                    <td>{{ item.target_versions | join(', ') }}</td>
+                    <td>{{ item.preferred_baseline }} → {{ item.preferred_target }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.crd_version_changes %}
+        <h3>CRD version changes</h3>
+        <table>
+            <thead><tr><th>CRD</th><th>Added</th><th>Removed</th><th>Storage</th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.crd_version_changes %}
+                <tr>
+                    <td><code>{{ item.name }}</code></td>
+                    <td class="added">{{ item.added_versions | join(', ') }}</td>
+                    <td class="removed">{{ item.removed_versions | join(', ') }}</td>
+                    <td>{{ item.storage_baseline }} → {{ item.storage_target }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.deprecated_crds %}
+        <h3>Deprecated APIs that may affect managed services</h3>
+        <table>
+            <thead><tr><th>CRD</th><th>Deprecated versions</th><th>Warning</th><th></th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.deprecated_crds %}
+                <tr>
+                    <td><code>{{ item.name }}</code></td>
+                    <td class="changed">{% for v in item.versions %}{{ v.version }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+                    <td>{% for v in item.versions %}{{ v.warning }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+                    <td>{% if item.managed_service %}<span class="badge badge-managed">managed</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.removed_api_resources %}
+        <h3>Removed API resources</h3>
+        <table>
+            <thead><tr><th>Resource</th><th>Kind</th><th>Version</th><th></th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.removed_api_resources %}
+                <tr>
+                    <td><code>{{ item.id }}</code></td>
+                    <td>{{ item.kind }}</td>
+                    <td>{{ item.version }}</td>
+                    <td>{% if item.managed_service %}<span class="badge badge-managed">managed</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+
+        {% if topo.comparison.removed_crds %}
+        <h3>Removed CRDs</h3>
+        <table>
+            <thead><tr><th>CRD</th><th>Purpose</th><th></th></tr></thead>
+            <tbody>
+            {% for item in topo.comparison.removed_crds %}
+                <tr>
+                    <td><code>{{ item.name }}</code></td>
+                    <td>{{ item.purpose }}</td>
+                    <td>{% if item.managed_service %}<span class="badge badge-managed">managed</span>{% endif %}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+
+        <div class="footer">
+            Generated by <a href="https://github.com/openshift-online/rosa-gap-analysis" target="_blank">ROSA Gap Analysis</a>
+        </div>
+    </div>
+</body>
+</html>

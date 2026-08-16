@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ type }} Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; }
+        h1 { color: #333; border-bottom: 3px solid #0066cc; padding-bottom: 10px; }
+        h2 { color: #444; margin-top: 30px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
+        h3 { color: #555; margin-top: 20px; }
+        .metadata { background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #0066cc; color: white; font-weight: 600; }
+        code { background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+        .skip { background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .note { background-color: #f8f9fa; padding: 12px; border-radius: 5px; color: #555; font-size: 0.9em; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ type }} Report</h1>
+        <div class="metadata">
+            <p><strong>Generated:</strong> {{ timestamp }}</p>
+            <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code></p>
+            <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
+            <p><strong>Source:</strong> Cluster install health snapshots from Prow GCS</p>
+            <p><strong>Result:</strong> {{ validation_result }} (informational)</p>
+        </div>
+        <p class="note">{{ note }}</p>
+        {% include '_topology_coverage.html.j2' %}
+
+        <h2>Summary</h2>
+        <table style="width: 70%;">
+            <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+            <tbody>
+                <tr><td>New ClusterOperators</td><td style="text-align: center;">{{ summary.new_operators }}</td></tr>
+                <tr><td>Removed ClusterOperators</td><td style="text-align: center;">{{ summary.removed_operators }}</td></tr>
+                <tr><td>Newly degraded</td><td style="text-align: center;">{{ summary.newly_degraded }}</td></tr>
+                <tr><td>Newly unavailable</td><td style="text-align: center;">{{ summary.newly_unavailable }}</td></tr>
+                <tr><td>Recovered degraded</td><td style="text-align: center;">{{ summary.recovered_degraded }}</td></tr>
+                <tr><td>Recovered unavailable</td><td style="text-align: center;">{{ summary.recovered_unavailable }}</td></tr>
+                <tr><td>Newly NotReady nodes</td><td style="text-align: center;">{{ summary.newly_notready_nodes }}</td></tr>
+            </tbody>
+        </table>
+
+        {% for topo in topologies %}
+        <h2>{{ topo.display_name or (topo.topology | upper) }}</h2>
+        {% if topo.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.skip_reason }}</div>
+        {% else %}
+        <p>
+            Baseline ({{ topo.baseline.cluster_role or topo.baseline_topology or topo.topology }}):
+            <code>{{ topo.baseline.cluster_version or topo.baseline.openshift_version }}</code>
+            install {{ topo.comparison.overall_status_baseline or '?' }}
+            {% if topo.baseline.gcs_url %}(<a href="{{ topo.baseline.gcs_url }}">snapshot</a>){% endif %}
+            → Target ({{ topo.target.cluster_role or topo.target_topology or topo.topology }}):
+            <code>{{ topo.target.cluster_version or topo.target.openshift_version }}</code>
+            install {{ topo.comparison.overall_status_target or '?' }}
+            {% if topo.target.gcs_url %}(<a href="{{ topo.target.gcs_url }}">snapshot</a>){% endif %}
+        </p>
+        <p>Nodes: {{ topo.comparison.node_count_baseline }} → {{ topo.comparison.node_count_target }}</p>
+
+        {% if topo.comparison.newly_degraded %}
+        <h3>Newly degraded ClusterOperators</h3>
+        <ul>{% for name in topo.comparison.newly_degraded %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+        {% endif %}
+        {% if topo.comparison.newly_unavailable %}
+        <h3>Newly unavailable ClusterOperators</h3>
+        <ul>{% for name in topo.comparison.newly_unavailable %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+        {% endif %}
+        {% if topo.comparison.new_operators %}
+        <h3>New ClusterOperators</h3>
+        <ul>{% for name in topo.comparison.new_operators %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+        {% endif %}
+        {% if topo.comparison.removed_operators %}
+        <h3>Removed ClusterOperators</h3>
+        <ul>{% for name in topo.comparison.removed_operators %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+        {% endif %}
+        {% if topo.comparison.newly_notready_nodes %}
+        <h3>Newly NotReady nodes</h3>
+        <ul>{% for name in topo.comparison.newly_notready_nodes %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+        {% endif %}
+        {% if topo.comparison.recovered_degraded %}
+        <h3>Recovered degraded ClusterOperators</h3>
+        <ul>{% for name in topo.comparison.recovered_degraded %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+        {% endif %}
+        {% if topo.comparison.recovered_unavailable %}
+        <h3>Recovered unavailable ClusterOperators</h3>
+        <ul>{% for name in topo.comparison.recovered_unavailable %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+        {% endif %}
+        {% if not (topo.comparison.newly_degraded or topo.comparison.newly_unavailable or topo.comparison.new_operators or topo.comparison.removed_operators or topo.comparison.newly_notready_nodes or topo.comparison.recovered_degraded or topo.comparison.recovered_unavailable) %}
+        <p><em>No install-health differences for this topology.</em></p>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+
+        <div class="footer">
+            <p>Generated by ROSA Gap Analysis Check #11</p>
+        </div>
+    </div>
+</body>
+</html>

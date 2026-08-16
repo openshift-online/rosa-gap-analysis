@@ -31,7 +31,7 @@ gap-analysis-full_4.20_to_4.21_20260325_153500.json
 
 ## Individual Script Reports
 
-All reports follow the global 8-check validation system. See [Validation Checks](validation-checks.md) for details.
+All reports follow the global 12-check validation system. See [Validation Checks](validation-checks.md) for details.
 
 ### AWS STS Gap Analysis (Checks 1-2)
 
@@ -124,6 +124,80 @@ Generates:
 - Configuration metadata validation
 - Timestamp and version information
 
+- Timestamp and version information
+
+### API Resources and CRD Gap Analysis (Check 9 - Informational)
+
+```bash
+python3 scripts/gap-api-resources.py --baseline 4.20 --target 4.21
+```
+
+Generates:
+- `gap-analysis-api-resources_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
+- `gap-analysis-api-resources_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+
+**Report Contents:**
+- **Check 9:** API Resources and CRD Diff Validation from live cluster snapshots (informational)
+- New / removed built-in API resources (HCP, Classic, and OSD GCP; OSD GCP skipped for 5.x)
+- New / removed CRDs and their purpose
+- API and CRD version changes (promotions, removed versions, storage version)
+- Newly deprecated CRD versions that may affect managed services
+- SKIP when API Resources and CRD snapshots are not yet in GCS
+
+### Critical Alerts Diff Validation (Check 10 - Informational)
+
+```bash
+python3 scripts/gap-critical-alerts.py --baseline 4.20 --target 4.21
+```
+
+Generates:
+- `gap-analysis-critical-alerts_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
+- `gap-analysis-critical-alerts_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+
+**Report Contents:**
+- **Check 10:** Critical Alerts Diff Validation from live PrometheusRule snapshots (informational)
+- New critical alerts
+- New alerts recommended to inherit vs silence
+- Modified alerts (expr, for, severity) requiring review
+- Predicted frequency heuristic from the rule `for` duration
+- SKIP when Critical Alerts snapshots are not yet in GCS
+
+### Cluster Install and Delete Validation (Check 11 - Informational)
+
+```bash
+python3 scripts/gap-cluster-install.py --baseline 4.20 --target 4.21
+```
+
+Generates:
+- `gap-analysis-cluster-install_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
+- `gap-analysis-cluster-install_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+
+**Report Contents:**
+- **Check 11:** Cluster Install and Delete Validation from live ClusterOperator/node snapshots (informational)
+- New / removed ClusterOperators
+- Newly degraded or unavailable operators
+- Node count and newly NotReady nodes
+- Overall install status (PASSED/FAILED)
+- SKIP when Cluster Install snapshots are not yet in GCS
+- Note: the CI step captures install health before deprovision; delete-duration metrics are not in the snapshot yet
+
+### Target E2E Validation and alert monitoring (Check 12)
+
+```bash
+python3 scripts/gap-e2e-validation.py --baseline 4.20 --target 4.21
+```
+
+Generates:
+- `gap-analysis-e2e-validation_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
+- `gap-analysis-e2e-validation_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+
+**Report Contents:**
+- **Check 12:** Target-version rosa-e2e JUnit (`junit-rosa-e2e.xml` from `as: rosa-e2e-test`)
+- Per-topology PASS/FAIL/SKIP and failed test names
+- Alert monitoring subsection (SKIP until VerifyNoCriticalAlerts exists in rosa-e2e)
+- OSD GCP skipped when the target is 5.x
+- SKIP when JUnit is not yet in GCS
+
 ### Feature Gate Gap Analysis (Check 8 - Informational)
 
 ```bash
@@ -143,7 +217,7 @@ Generates:
 - Total changes summary
 - Timestamp and version information
 
-## Combined Report (gap-all.sh) - All 8 Checks
+## Combined Report (gap-all.sh) - All 12 Checks
 
 When running the full gap analysis orchestrator:
 
@@ -156,7 +230,7 @@ bash scripts/gap-all.sh --baseline 4.20 --target 4.21
 - `gap-analysis-full_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
 - `gap-analysis-full_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
 
-**Combined Report Contents (All 8 Checks):**
+**Combined Report Contents (All 12 Checks):**
 - **Check 1:** AWS STS Resources validation
 - **Check 2:** AWS STS Admin Ack validation
 - **Check 3:** GCP WIF Resources validation
@@ -164,7 +238,11 @@ bash scripts/gap-all.sh --baseline 4.20 --target 4.21
 - **Check 5:** OCP Admin Gates validation
 - **Check 6:** Versions & Channels validation
 - **Check 7:** OCM Version Gates validation
-- **Check 8:** Feature Gates analysis (informational)
+- **Check 8:** Feature Gates analysis (informational, always last)
+- **Check 9:** API Resources and CRD Diff Validation (informational)
+- **Check 10:** Critical Alerts Diff Validation (informational)
+- **Check 11:** Cluster Install and Delete Validation (informational)
+- **Check 12:** Target E2E Validation and alert monitoring
 - Aggregate statistics
 - Timestamp and version information
 
@@ -174,7 +252,11 @@ bash scripts/gap-all.sh --baseline 4.20 --target 4.21
 3. OCP Admin Gates (Check 5)
 4. Versions & Channels (Check 6)
 5. OCM Version Gates (Check 7)
-6. Feature Gates (Check 8) - Always executed last
+6. API Resources and CRD Diff Validation (Check 9)
+7. Critical Alerts Diff Validation (Check 10)
+8. Cluster Install and Delete Validation (Check 11)
+9. Target E2E Validation and alert monitoring (Check 12)
+10. Feature Gates (Check 8) - Always executed last
 
 ## Viewing Reports
 

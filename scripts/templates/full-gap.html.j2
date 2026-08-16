@@ -427,6 +427,26 @@
                 {% set info_count = info_count + 1 %}
             {% endif %}
 
+            {% if api_resources %}
+                {% set info_count = info_count + 1 %}
+            {% endif %}
+
+            {% if critical_alerts %}
+                {% set info_count = info_count + 1 %}
+            {% endif %}
+
+            {% if cluster_install %}
+                {% set info_count = info_count + 1 %}
+            {% endif %}
+
+            {% if e2e_validation %}
+                {% if e2e_validation.validation_result == 'FAIL' %}
+                    {% set critical_count = critical_count + 1 %}
+                {% elif e2e_validation.validation_result == 'PASS' %}
+                    {% set success_count = success_count + 1 %}
+                {% endif %}
+            {% endif %}
+
             {% if versions_channels %}
                 {% if versions_channels.validation_result == 'FAIL' %}
                     {% set critical_count = critical_count + 1 %}
@@ -648,6 +668,115 @@
                             {% else %}
                             Common: {{ ocm_version_gate.comparison.common_gates_count }} |
                             Active: {{ ocm_version_gate.gates_count.target }} (target) / {{ ocm_version_gate.gates_count.baseline }} (baseline)
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    {% if api_resources %}
+                    <tr>
+                        <td><strong>CHECK #9:</strong> API Resources and CRD Diff Validation</td>
+                        <td>
+                            {% if api_resources.validation_result == 'SKIP' %}
+                            <span class="changed">ℹ SKIP</span> (Info)
+                            {% else %}
+                            <span class="added">✅ PASS</span> (Info)
+                            {% endif %}
+                        </td>
+                        <td style="text-align: center;">{{ (api_resources.summary.new_api_resources or 0) + (api_resources.summary.new_crds or 0) }}</td>
+                        <td style="text-align: center;">{{ (api_resources.summary.removed_api_resources or 0) + (api_resources.summary.removed_crds or 0) + (api_resources.summary.deprecated_crds or 0) }}</td>
+                        <td>
+                            {% if api_resources.validation_result == 'SKIP' %}
+                            {{ api_resources.error_message or api_resources.note or 'waiting for API Resources and CRD snapshots' }}
+                            {% else %}
+                            {{ (api_resources.summary.api_version_changes or 0) + (api_resources.summary.crd_version_changes or 0) }} version change(s)
+                            {% if api_resources.summary.compared_topologies %}
+                            | {{ api_resources.summary.compared_topologies | map('topology_label') | join(', ') }}
+                            {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    {% if critical_alerts %}
+                    <tr>
+                        <td><strong>CHECK #10:</strong> Critical Alerts Diff Validation</td>
+                        <td>
+                            {% if critical_alerts.validation_result == 'SKIP' %}
+                            <span class="changed">ℹ SKIP</span> (Info)
+                            {% else %}
+                            <span class="added">✅ PASS</span> (Info)
+                            {% endif %}
+                        </td>
+                        <td style="text-align: center;">{{ (critical_alerts.summary.new_critical or 0) + (critical_alerts.summary.new_other or 0) }}</td>
+                        <td style="text-align: center;">{{ critical_alerts.summary.removed or 0 }}</td>
+                        <td>
+                            {% if critical_alerts.validation_result == 'SKIP' %}
+                            {{ critical_alerts.error_message or critical_alerts.note or 'waiting for Critical Alerts snapshots' }}
+                            {% else %}
+                            inherit {{ critical_alerts.summary.inherit or 0 }} |
+                            silence {{ critical_alerts.summary.silence or 0 }} |
+                            review {{ critical_alerts.summary.review or 0 }}
+                            {% if critical_alerts.summary.compared_topologies %}
+                            | {{ critical_alerts.summary.compared_topologies | map('topology_label') | join(', ') }}
+                            {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    {% if cluster_install %}
+                    <tr>
+                        <td><strong>CHECK #11:</strong> Cluster Install and Delete Validation</td>
+                        <td>
+                            {% if cluster_install.validation_result == 'SKIP' %}
+                            <span class="changed">ℹ SKIP</span> (Info)
+                            {% else %}
+                            <span class="added">✅ PASS</span> (Info)
+                            {% endif %}
+                        </td>
+                        <td style="text-align: center;">{{ (cluster_install.summary.new_operators or 0) + (cluster_install.summary.newly_degraded or 0) + (cluster_install.summary.newly_unavailable or 0) }}</td>
+                        <td style="text-align: center;">{{ (cluster_install.summary.removed_operators or 0) + (cluster_install.summary.newly_notready_nodes or 0) }}</td>
+                        <td>
+                            {% if cluster_install.validation_result == 'SKIP' %}
+                            {{ cluster_install.error_message or cluster_install.note or 'waiting for Cluster Install snapshots' }}
+                            {% else %}
+                            degraded {{ cluster_install.summary.newly_degraded or 0 }} |
+                            unavailable {{ cluster_install.summary.newly_unavailable or 0 }} |
+                            NotReady {{ cluster_install.summary.newly_notready_nodes or 0 }}
+                            {% if cluster_install.summary.compared_topologies %}
+                            | {{ cluster_install.summary.compared_topologies | map('topology_label') | join(', ') }}
+                            {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    {% if e2e_validation %}
+                    <tr>
+                        <td><strong>CHECK #12:</strong> Target E2E Validation and alert monitoring</td>
+                        <td>
+                            {% if e2e_validation.validation_result == 'FAIL' %}
+                            <span class="removed">❌ FAIL</span>
+                            {% elif e2e_validation.validation_result == 'SKIP' %}
+                            <span class="changed">ℹ SKIP</span>
+                            {% else %}
+                            <span class="added">✅ PASS</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: center;">{{ e2e_validation.summary.failed_count or 0 }}</td>
+                        <td style="text-align: center;">{{ e2e_validation.summary.skipped or 0 }}</td>
+                        <td>
+                            {% if e2e_validation.validation_result == 'SKIP' %}
+                            {{ e2e_validation.error_message or e2e_validation.note or 'waiting for target e2e JUnit' }}
+                            {% else %}
+                            tests {{ e2e_validation.summary.tests or 0 }} |
+                            failures {{ e2e_validation.summary.failures or 0 }} |
+                            alert monitoring fail {{ e2e_validation.summary.alert_monitoring_fail or 0 }} /
+                            skip {{ e2e_validation.summary.alert_monitoring_skip or 0 }}
+                            {% if e2e_validation.summary.compared_topologies %}
+                            | {{ e2e_validation.summary.compared_topologies | map('topology_label') | join(', ') }}
+                            {% endif %}
                             {% endif %}
                         </td>
                     </tr>
@@ -1323,6 +1452,402 @@
             {% else %}
                 <p style="color: #6c757d; font-style: italic;">No version gates were detected for baseline version {{ ocm_version_gate.baseline_minor }}.x.</p>
             {% endif %}
+            {% endif %}
+
+            {% if api_resources %}
+            <h2 id="api-resources">CHECK #9: API Resources and CRD Diff Validation (Info)</h2>
+            <p>Live API Resources and CRD snapshots from Prow GCS (HCP, Classic, and OSD GCP; OSD GCP skipped for OpenShift 5.x). Informational only.</p>
+            {% if api_resources.note %}<p><em>{{ api_resources.note }}</em></p>{% endif %}
+            {% if api_resources.validation_result == 'SKIP' %}
+            <div style="background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>Skipped:</strong> {{ api_resources.error_message or api_resources.note or 'No API Resources and CRD snapshots found yet.' }}
+            </div>
+            {% endif %}
+            {% with topologies = api_resources.topologies %}
+            {% include '_topology_coverage.html.j2' %}
+            {% endwith %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th style="text-align: center;">Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr><td>New API resources</td><td style="text-align: center;">{{ api_resources.summary.new_api_resources }}</td></tr>
+                    <tr><td>Removed API resources</td><td style="text-align: center;">{{ api_resources.summary.removed_api_resources }}</td></tr>
+                    <tr><td>API version changes</td><td style="text-align: center;">{{ api_resources.summary.api_version_changes }}</td></tr>
+                    <tr><td>New CRDs</td><td style="text-align: center;">{{ api_resources.summary.new_crds }}</td></tr>
+                    <tr><td>Removed CRDs</td><td style="text-align: center;">{{ api_resources.summary.removed_crds }}</td></tr>
+                    <tr><td>CRD version changes</td><td style="text-align: center;">{{ api_resources.summary.crd_version_changes }}</td></tr>
+                    <tr><td>Newly deprecated CRD versions</td><td style="text-align: center;">{{ api_resources.summary.deprecated_crds }}</td></tr>
+                    <tr><td>Managed-service new CRDs</td><td style="text-align: center;">{{ api_resources.summary.managed_new_crds }}</td></tr>
+                    <tr><td>Managed-service deprecated CRDs</td><td style="text-align: center;">{{ api_resources.summary.managed_deprecated_crds }}</td></tr>
+                </tbody>
+            </table>
+            {% for topo in api_resources.topologies %}
+            <h3>{{ topo.display_name or (topo.topology | topology_label) }}</h3>
+            {% if topo.status == 'SKIP' %}
+            <p><em>Skipped: {{ topo.skip_reason }}</em></p>
+            {% else %}
+            {% if topo.comparison.new_crds %}
+            <h4>New CRDs</h4>
+            <table>
+                <thead><tr><th>CRD</th><th>Purpose</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.new_crds %}
+                    <tr>
+                        <td><code>{{ item.name }}</code>{% if item.managed_service %} <em>(managed)</em>{% endif %}</td>
+                        <td>{{ item.purpose }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.new_api_resources %}
+            <h4>New API resources</h4>
+            <table>
+                <thead><tr><th>Resource</th><th>Kind</th><th>Version</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.new_api_resources %}
+                    <tr>
+                        <td><code>{{ item.id }}</code></td>
+                        <td>{{ item.kind }}</td>
+                        <td>{{ item.version }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.removed_api_resources %}
+            <h4>Removed API resources</h4>
+            <table>
+                <thead><tr><th>Resource</th><th>Kind</th><th>Version</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.removed_api_resources %}
+                    <tr>
+                        <td><code>{{ item.id }}</code></td>
+                        <td>{{ item.kind }}</td>
+                        <td>{{ item.version }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.removed_crds %}
+            <h4>Removed CRDs</h4>
+            <table>
+                <thead><tr><th>CRD</th><th>Purpose</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.removed_crds %}
+                    <tr>
+                        <td><code>{{ item.name }}</code></td>
+                        <td>{{ item.purpose }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.deprecated_crds %}
+            <h4>Deprecated APIs that may affect managed services</h4>
+            <table>
+                <thead><tr><th>CRD</th><th>Versions</th><th>Warning</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.deprecated_crds %}
+                    <tr>
+                        <td><code>{{ item.name }}</code>{% if item.managed_service %} <em>(managed)</em>{% endif %}</td>
+                        <td>{% for v in item.versions %}{{ v.version }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+                        <td>{% for v in item.versions %}{{ v.warning }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.api_version_changes %}
+            <h4>API version changes</h4>
+            <table>
+                <thead><tr><th>Resource</th><th>Baseline</th><th>Target</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.api_version_changes %}
+                    <tr>
+                        <td><code>{{ item.id }}</code> {{ item.kind }}</td>
+                        <td>{{ item.baseline_versions | join(', ') }}</td>
+                        <td>{{ item.target_versions | join(', ') }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.crd_version_changes %}
+            <h4>CRD version changes</h4>
+            <table>
+                <thead><tr><th>CRD</th><th>Added</th><th>Removed</th><th>Storage</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.crd_version_changes %}
+                    <tr>
+                        <td><code>{{ item.name }}</code></td>
+                        <td>{{ item.added_versions | join(', ') }}</td>
+                        <td>{{ item.removed_versions | join(', ') }}</td>
+                        <td>{{ item.storage_baseline }} → {{ item.storage_target }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if not (topo.comparison.new_api_resources or topo.comparison.removed_api_resources or topo.comparison.api_version_changes or topo.comparison.new_crds or topo.comparison.removed_crds or topo.comparison.crd_version_changes or topo.comparison.deprecated_crds) %}
+            <p><em>No API or CRD differences for this topology.</em></p>
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+
+            {% if critical_alerts %}
+            <h2 id="critical-alerts">CHECK #10: Critical Alerts Diff Validation (Info)</h2>
+            <p>Live PrometheusRule alerts from Prow GCS (HCP, Classic, and OSD GCP; OSD GCP skipped for OpenShift 5.x). Informational only. Inherit/silence are heuristics; predicted frequency is from the rule <code>for</code> duration.</p>
+            {% if critical_alerts.note %}<p><em>{{ critical_alerts.note }}</em></p>{% endif %}
+            {% if critical_alerts.validation_result == 'SKIP' %}
+            <div style="background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>Skipped:</strong> {{ critical_alerts.error_message or critical_alerts.note or 'No Critical Alerts snapshots found yet.' }}
+            </div>
+            {% endif %}
+            {% with topologies = critical_alerts.topologies %}
+            {% include '_topology_coverage.html.j2' %}
+            {% endwith %}
+            <table>
+                <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+                <tbody>
+                    <tr><td>New critical alerts</td><td style="text-align: center;">{{ critical_alerts.summary.new_critical }}</td></tr>
+                    <tr><td>New non-critical alerts</td><td style="text-align: center;">{{ critical_alerts.summary.new_other }}</td></tr>
+                    <tr><td>Removed alerts</td><td style="text-align: center;">{{ critical_alerts.summary.removed }}</td></tr>
+                    <tr><td>Recommend inherit</td><td style="text-align: center;">{{ critical_alerts.summary.inherit }}</td></tr>
+                    <tr><td>Recommend silence</td><td style="text-align: center;">{{ critical_alerts.summary.silence }}</td></tr>
+                    <tr><td>Modified / review</td><td style="text-align: center;">{{ critical_alerts.summary.modified }}</td></tr>
+                </tbody>
+            </table>
+            {% for topo in critical_alerts.topologies %}
+            <h3>{{ topo.display_name or (topo.topology | topology_label) }}</h3>
+            {% if topo.status == 'SKIP' %}
+            <p><em>Skipped: {{ topo.skip_reason }}</em></p>
+            {% else %}
+            {% if topo.comparison.inherit %}
+            <h4>New alerts that should be inherited</h4>
+            <table>
+                <thead><tr><th>Alert</th><th>Namespace</th><th>Predicted frequency</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.inherit %}
+                    <tr>
+                        <td><code>{{ item.alert }}</code></td>
+                        <td>{{ item.namespace }}</td>
+                        <td>{{ item.predicted_frequency }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.silence %}
+            <h4>New alerts that should be silenced</h4>
+            <table>
+                <thead><tr><th>Alert</th><th>Namespace</th><th>Severity</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.silence %}
+                    <tr>
+                        <td><code>{{ item.alert }}</code></td>
+                        <td>{{ item.namespace }}</td>
+                        <td>{{ item.severity }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.modified %}
+            <h4>Modified alerts requiring review</h4>
+            <table>
+                <thead><tr><th>Alert</th><th>Changed fields</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.modified %}
+                    <tr>
+                        <td><code>{{ item.alert }}</code></td>
+                        <td>{{ (item.changed_fields or []) | join(', ') }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.new_critical %}
+            <h4>New critical-level alerts</h4>
+            <table>
+                <thead><tr><th>Alert</th><th>Namespace</th><th>Recommendation</th><th>Predicted frequency</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.new_critical %}
+                    <tr>
+                        <td><code>{{ item.alert }}</code></td>
+                        <td>{{ item.namespace }}</td>
+                        <td>{{ item.recommendation }}</td>
+                        <td>{{ item.predicted_frequency }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.new_other %}
+            <h4>New non-critical alerts</h4>
+            <table>
+                <thead><tr><th>Alert</th><th>Namespace</th><th>Severity</th><th>Recommendation</th><th>Predicted frequency</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.new_other %}
+                    <tr>
+                        <td><code>{{ item.alert }}</code></td>
+                        <td>{{ item.namespace }}</td>
+                        <td>{{ item.severity }}</td>
+                        <td>{{ item.recommendation }}</td>
+                        <td>{{ item.predicted_frequency }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if topo.comparison.removed %}
+            <h4>Removed alerts</h4>
+            <table>
+                <thead><tr><th>Alert</th><th>Namespace</th><th>Severity</th></tr></thead>
+                <tbody>
+                {% for item in topo.comparison.removed %}
+                    <tr>
+                        <td><code>{{ item.alert }}</code></td>
+                        <td>{{ item.namespace }}</td>
+                        <td>{{ item.severity }}</td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+            {% if not (topo.comparison.inherit or topo.comparison.silence or topo.comparison.modified or topo.comparison.new_critical or topo.comparison.new_other or topo.comparison.removed) %}
+            <p><em>No alert differences for this topology.</em></p>
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+
+            {% if cluster_install %}
+            <h2 id="cluster-install">CHECK #11: Cluster Install and Delete Validation (Info)</h2>
+            <p>Live ClusterOperator and node health snapshots from Prow GCS (HCP, Classic, and OSD GCP; OSD GCP skipped for OpenShift 5.x). Informational only. The CI step captures install health before deprovision; delete-duration metrics are not in the snapshot yet.</p>
+            {% if cluster_install.note %}<p><em>{{ cluster_install.note }}</em></p>{% endif %}
+            {% if cluster_install.validation_result == 'SKIP' %}
+            <div style="background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>Skipped:</strong> {{ cluster_install.error_message or cluster_install.note or 'No Cluster Install snapshots found yet.' }}
+            </div>
+            {% endif %}
+            {% with topologies = cluster_install.topologies %}
+            {% include '_topology_coverage.html.j2' %}
+            {% endwith %}
+            <table>
+                <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+                <tbody>
+                    <tr><td>New ClusterOperators</td><td style="text-align: center;">{{ cluster_install.summary.new_operators }}</td></tr>
+                    <tr><td>Removed ClusterOperators</td><td style="text-align: center;">{{ cluster_install.summary.removed_operators }}</td></tr>
+                    <tr><td>Newly degraded</td><td style="text-align: center;">{{ cluster_install.summary.newly_degraded }}</td></tr>
+                    <tr><td>Newly unavailable</td><td style="text-align: center;">{{ cluster_install.summary.newly_unavailable }}</td></tr>
+                    <tr><td>Recovered degraded</td><td style="text-align: center;">{{ cluster_install.summary.recovered_degraded }}</td></tr>
+                    <tr><td>Recovered unavailable</td><td style="text-align: center;">{{ cluster_install.summary.recovered_unavailable }}</td></tr>
+                    <tr><td>Newly NotReady nodes</td><td style="text-align: center;">{{ cluster_install.summary.newly_notready_nodes }}</td></tr>
+                </tbody>
+            </table>
+            {% for topo in cluster_install.topologies %}
+            <h3>{{ topo.display_name or (topo.topology | topology_label) }}</h3>
+            {% if topo.status == 'SKIP' %}
+            <p><em>Skipped: {{ topo.skip_reason }}</em></p>
+            {% else %}
+            <p>
+                Install {{ topo.comparison.overall_status_baseline or '?' }} → {{ topo.comparison.overall_status_target or '?' }}
+                | nodes {{ topo.comparison.node_count_baseline }} → {{ topo.comparison.node_count_target }}
+            </p>
+            {% if topo.comparison.newly_degraded %}
+            <h4>Newly degraded ClusterOperators</h4>
+            <ul>{% for name in topo.comparison.newly_degraded %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+            {% endif %}
+            {% if topo.comparison.newly_unavailable %}
+            <h4>Newly unavailable ClusterOperators</h4>
+            <ul>{% for name in topo.comparison.newly_unavailable %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+            {% endif %}
+            {% if topo.comparison.new_operators %}
+            <h4>New ClusterOperators</h4>
+            <ul>{% for name in topo.comparison.new_operators %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+            {% endif %}
+            {% if topo.comparison.removed_operators %}
+            <h4>Removed ClusterOperators</h4>
+            <ul>{% for name in topo.comparison.removed_operators %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+            {% endif %}
+            {% if topo.comparison.newly_notready_nodes %}
+            <h4>Newly NotReady nodes</h4>
+            <ul>{% for name in topo.comparison.newly_notready_nodes %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+            {% endif %}
+            {% if topo.comparison.recovered_degraded %}
+            <h4>Recovered degraded ClusterOperators</h4>
+            <ul>{% for name in topo.comparison.recovered_degraded %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+            {% endif %}
+            {% if topo.comparison.recovered_unavailable %}
+            <h4>Recovered unavailable ClusterOperators</h4>
+            <ul>{% for name in topo.comparison.recovered_unavailable %}<li><code>{{ name }}</code></li>{% endfor %}</ul>
+            {% endif %}
+            {% if not (topo.comparison.newly_degraded or topo.comparison.newly_unavailable or topo.comparison.new_operators or topo.comparison.removed_operators or topo.comparison.newly_notready_nodes or topo.comparison.recovered_degraded or topo.comparison.recovered_unavailable) %}
+            <p><em>No install-health differences for this topology.</em></p>
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+
+            {% if e2e_validation %}
+            <h2 id="e2e-validation">CHECK #12: Target E2E Validation and alert monitoring</h2>
+            <p>Target-version only. Consumes existing <code>junit-rosa-e2e.xml</code> from <code>as: rosa-e2e-test</code>. Fetches HCP, Classic, and OSD GCP JUnit. OSD GCP is skipped for OpenShift 5.x. Failed tests FAIL this check. Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.</p>
+            {% if e2e_validation.note %}<p><em>{{ e2e_validation.note }}</em></p>{% endif %}
+            {% if e2e_validation.validation_result == 'SKIP' %}
+            <div style="background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>Skipped:</strong> {{ e2e_validation.error_message or e2e_validation.note or 'No target e2e JUnit found yet.' }}
+            </div>
+            {% elif e2e_validation.validation_result == 'FAIL' %}
+            <div style="background-color: #f8d7da; border-left: 4px solid #721c24; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>Failed:</strong> {{ e2e_validation.summary.failed_count or 0 }} failing test(s).
+            </div>
+            {% endif %}
+            {% with topologies = e2e_validation.topologies %}
+            {% include '_topology_coverage.html.j2' %}
+            {% endwith %}
+            <table>
+                <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+                <tbody>
+                    <tr><td>Tests</td><td style="text-align: center;">{{ e2e_validation.summary.tests or 0 }}</td></tr>
+                    <tr><td>Failures</td><td style="text-align: center;">{{ e2e_validation.summary.failures or 0 }}</td></tr>
+                    <tr><td>Skipped tests</td><td style="text-align: center;">{{ e2e_validation.summary.skipped or 0 }}</td></tr>
+                    <tr><td>Alert monitoring FAIL</td><td style="text-align: center;">{{ e2e_validation.summary.alert_monitoring_fail or 0 }}</td></tr>
+                    <tr><td>Alert monitoring SKIP</td><td style="text-align: center;">{{ e2e_validation.summary.alert_monitoring_skip or 0 }}</td></tr>
+                </tbody>
+            </table>
+            {% for topo in e2e_validation.topologies %}
+            <h3>{{ topo.display_name or (topo.topology | topology_label) }}</h3>
+            {% if topo.status == 'SKIP' %}
+            <p><em>Skipped: {{ topo.skip_reason }}</em></p>
+            {% else %}
+            <p>
+                {{ topo.status }} | tests {{ topo.tests }} / failures {{ topo.failures }} / skipped {{ topo.skipped }}
+                | alert monitoring {{ topo.alert_monitoring.status }}
+                {% if topo.source.gcs_url %}
+                | <a href="{{ topo.source.gcs_url }}">JUnit</a>
+                {% endif %}
+                {% if topo.source.job_name and topo.source.job_name != 'local' %}
+                | <code>{{ topo.source.job_name }}</code>
+                {% endif %}
+            </p>
+            {% if topo.alert_monitoring.status == 'SKIP' %}
+            <p><em>Alert monitoring skipped: {{ topo.alert_monitoring.skip_reason }}</em></p>
+            {% elif topo.alert_monitoring.status == 'FAIL' %}
+            <p><strong>Alert monitoring failed:</strong> <code>{{ topo.alert_monitoring.test_name }}</code></p>
+            {% endif %}
+            {% if topo.failed_cases %}
+            <h4>Failed tests</h4>
+            <ul>{% for case in topo.failed_cases %}<li><code>{{ case.name }}</code>{% if case.message %} — {{ case.message }}{% endif %}</li>{% endfor %}</ul>
+            {% endif %}
+            {% endif %}
+            {% endfor %}
             {% endif %}
 
             {% if feature_gates %}

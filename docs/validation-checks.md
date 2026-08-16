@@ -1,6 +1,6 @@
 # Validation Checks
 
-The gap analysis framework performs 8 validation checks across all scripts.
+The gap analysis framework performs 12 validation checks across all scripts.
 
 ## Check Numbering
 
@@ -16,7 +16,10 @@ All scripts use a consistent global check numbering system:
 | **6** | Versions & Channels | Validates OCP version availability across OCM release channels (candidate/fast/stable/eus for GA, candidate-only for pre-GA) and marketplace availability (ROSA Classic via OCM API, ROSA HCP via ROSA CLI, OSD GCP via OCM API — 4.x only) | Exit code 1 on FAIL |
 | **7** | OCM Version Gates | Validates OCM version gate existence, configurations, and metadata for target OCP versions compared to baseline version gates | Exit code 1 on FAIL |
 | **8** | Feature Gates | Analyzes feature gate changes from Sippy API (Info only, always executed last). **Z-stream behavior:** When comparing z-stream versions (e.g., 4.21.15 → 4.21.16), shows default feature gates instead of differences | Always PASS (exit code 0) |
-
+| **9** | API Resources and CRD Diff Validation | Compares live ROSA API resources and CRDs from HCP, Classic, and OSD GCP cluster snapshots. Each topology is compared to itself. OSD GCP is skipped for OpenShift 5.x (AWS/STS-only). Identifies new/removed APIs and CRDs, version promotions, and deprecations that may affect managed services. Missing snapshots are SKIP, not FAIL. | Always PASS (exit code 0) |
+| **10** | Critical Alerts Diff Validation | Compares live PrometheusRule alerting rules from HCP, Classic, and OSD GCP cluster snapshots. Same topologies as Check #9. Identifies new critical alerts, modified queries/thresholds/severity, and recommends inherit vs silence vs review. Missing snapshots are SKIP. | Always PASS (exit code 0) |
+| **11** | Cluster Install and Delete Validation | Compares live ClusterOperator and node health from HCP, Classic, and OSD GCP cluster snapshots taken in the rosa-e2e **post** phase (before deprovision). Same topologies as Check #9. Identifies new/removed operators, newly degraded/unavailable operators, and NotReady nodes. Delete-duration metrics are not in the snapshot yet. Missing snapshots are SKIP. | Always PASS (exit code 0) |
+| **12** | Target E2E Validation and alert monitoring | Consumes target-version `junit-rosa-e2e.xml` from the existing rosa-e2e test step. Does not compare baseline vs target. Fetches HCP, Classic, and OSD GCP JUnit. OSD GCP is skipped for OpenShift 5.x. Missing JUnit is SKIP. Failed e2e tests FAIL. Alert monitoring looks for a future VerifyNoCriticalAlerts test; until it exists the subsection is SKIP and does not fail the check. | Exit code 1 on FAIL |
 
 
 ## Check Execution by Script
@@ -41,6 +44,18 @@ All scripts use a consistent global check numbering system:
 ### gap-feature-gates.py
 - **Check 8:** Feature Gates Analysis (Info only, always last)
 
+### gap-api-resources.py
+- **Check 9:** API Resources and CRD Diff Validation (Info only; consumes live cluster snapshots)
+
+### gap-critical-alerts.py
+- **Check 10:** Critical Alerts Diff Validation (Info only; consumes live PrometheusRule snapshots)
+
+### gap-cluster-install.py
+- **Check 11:** Cluster Install and Delete Validation (Info only; consumes live ClusterOperator/node snapshots)
+
+### gap-e2e-validation.py
+- **Check 12:** Target E2E Validation and alert monitoring (standard; consumes target-version junit-rosa-e2e.xml)
+
 ### gap-all.sh (Combined)
 Runs all checks in order:
 1. AWS STS (Checks 1-2)
@@ -48,7 +63,11 @@ Runs all checks in order:
 3. OCP Admin Gates (Check 5)
 4. Versions & Channels (Check 6)
 5. OCM Version Gates (Check 7)
-6. Feature Gates (Check 8) - Info only, always executed last
+6. API Resources and CRD Diff Validation (Check 9)
+7. Critical Alerts Diff Validation (Check 10)
+8. Cluster Install and Delete Validation (Check 11)
+9. Target E2E Validation and alert monitoring (Check 12)
+10. Feature Gates (Check 8) - Info only, always executed last
 
 ### Standalone (not part of CI)
 - **scripts/prod/gap-ga-validation.py** — GA Readiness Validation (run manually by SREs). See [ga-readiness-validation.md](ga-readiness-validation.md).
@@ -303,6 +322,83 @@ When no admin gates exist in cluster-version-operator, acknowledgment files use 
 - Analysis completes successfully
 - Changes are tracked but do not affect exit code
 
+### Check 9: API Resources and CRD Diff Validation
+
+**What it analyzes:**
+- New / removed built-in API resources
+- New / removed CRDs and version promotions/deprecations
+- Managed-service impact of CRD changes
+
+**Data source:**
+- Prow GCS snapshots from `rosa-gap-analysis-api-resources-and-crd` in the rosa-e2e **post** phase (`metadata.json`, `api-resources.json`, `crds.json`)
+- Jobs: HCP, Classic STS, and OSD GCP periodics. OSD GCP is skipped for OpenShift 5.x (AWS/STS-only). Not HCP FIPS.
+- HCP jobs also publish `management/` copies of those files from the Red Hat management cluster (control plane). Hosted/guest files stay at the snapshot root (customer data plane)
+- Prow job channel: GA → `stable`; pre-GA → `candidate` if that job has a snapshot, else `nightly`
+
+**Pass criteria:**
+- Always PASS (informational only)
+- Missing snapshots are SKIP, not FAIL
+- Each topology is compared to itself (HCP, Classic, OSD GCP)
+- OSD GCP is skipped for OpenShift 5.x (AWS/STS-only)
+
+### Check 10: Critical Alerts Diff Validation
+
+**What it analyzes:**
+- New critical / other PrometheusRule alerts
+- Inherit vs silence vs review recommendations
+- Modified expr / `for` / severity
+
+**Data source:**
+- Prow GCS snapshots from `rosa-gap-analysis-critical-alerts` in the rosa-e2e **post** phase (`metadata.json`, `alerts.json`)
+- Jobs: HCP, Classic STS, and OSD GCP periodics. OSD GCP is skipped for OpenShift 5.x (AWS/STS-only). Not HCP FIPS.
+- HCP jobs also publish `management/` copies of those files from the Red Hat management cluster (control plane)
+- Prow job channel: GA → `stable`; pre-GA → `candidate` if that job has a snapshot, else `nightly`
+
+**Pass criteria:**
+- Always PASS (informational only)
+- Missing snapshots are SKIP, not FAIL
+- Each topology is compared to itself (HCP, Classic, OSD GCP)
+- OSD GCP is skipped for OpenShift 5.x (AWS/STS-only)
+
+### Check 11: Cluster Install and Delete Validation
+
+**What it analyzes:**
+- ClusterOperator health (new/removed, newly degraded/unavailable, recovered)
+- Node Ready status and node count
+- Overall install status (PASSED/FAILED)
+
+**Data source:**
+- Prow GCS snapshots from `rosa-gap-analysis-cluster-install-delete-metrics` in the rosa-e2e **post** phase (`metadata.json`, `clusteroperators.json`, `nodes.json`)
+- Jobs: HCP, Classic STS, and OSD GCP periodics. OSD GCP is skipped for OpenShift 5.x (AWS/STS-only). Not HCP FIPS.
+- HCP jobs also publish `management/` copies of those files from the Red Hat management cluster (control plane). Hosted ClusterOperator/node health remains the FAIL/PASS source for the CI step itself
+- Prow job channel: GA → `stable`; pre-GA → `candidate` if that job has a snapshot, else `nightly`
+- The CI step captures install health while the cluster is still up, before deprovision. Delete-duration metrics are not in the snapshot yet.
+
+**Pass criteria:**
+- Always PASS (informational only)
+- Missing snapshots are SKIP, not FAIL
+- Each topology is compared to itself (HCP, Classic, OSD GCP)
+- OSD GCP is skipped for OpenShift 5.x (AWS/STS-only)
+
+### Check 12: Target E2E Validation and alert monitoring
+
+**What it analyzes:**
+- Target-version rosa-e2e JUnit results (pass/fail/skip)
+- Alert monitoring subsection (future VerifyNoCriticalAlerts Ginkgo test)
+
+**Data source:**
+- Prow GCS `junit-rosa-e2e.xml` from `as: rosa-e2e-test` (`.../rosa-e2e-test/artifacts/junit-rosa-e2e.xml`)
+- Prow job channel: GA → `stable`; pre-GA → `candidate` if that job has JUnit, else `nightly`
+- Target version only — baseline JUnit is not fetched
+- Does not use Check #10 `alerts.json` (those are PrometheusRule definitions, not firing state)
+
+**Pass criteria:**
+- PASS when parsed JUnit has no failing tests
+- SKIP when JUnit is missing
+- FAIL when e2e tests fail, or the alert-monitoring test is present and failed
+- Missing alert-monitoring test is SKIP for that subsection and does not fail the check
+- OSD GCP is skipped for OpenShift 5.x (AWS/STS-only)
+
 ## Version Resolution
 
 ### OpenShift 5.x Major Version Mapping
@@ -375,8 +471,8 @@ python3 ./scripts/gap-aws-sts.py --baseline 4.23 --target 5.0
 
 ## Exit Codes
 
-### Individual Scripts (gap-aws-sts.py, gap-gcp-wif.py, gap-ocp-gate-ack.py, gap-versions-channels.py, gap-ocm-version-gate.py)
-- **Exit 0 (PASS):** All relevant checks passed OR dry-run mode
+### Individual Scripts (gap-aws-sts.py, gap-gcp-wif.py, gap-ocp-gate-ack.py, gap-versions-channels.py, gap-ocm-version-gate.py, gap-e2e-validation.py)
+- **Exit 0 (PASS):** All relevant checks passed OR dry-run mode (Check #12 also exits 0 on SKIP)
 - **Exit 1 (FAIL):** One or more checks failed OR execution error
 
 ### Feature Gates Script (gap-feature-gates.py)
@@ -384,8 +480,8 @@ python3 ./scripts/gap-aws-sts.py --baseline 4.23 --target 5.0
 - **Exit 1 (FAIL):** Only on execution error (network, invalid version, etc.)
 
 ### Combined Script (gap-all.sh)
-- **Exit 0 (PASS):** All checks 1-7 passed (check 8 is informational) OR dry-run mode
-- **Exit 1 (FAIL):** Any of checks 1-7 failed OR execution error
+- **Exit 0 (PASS):** All checks 1-7 and 12 passed (checks 8-11 are informational) OR dry-run mode
+- **Exit 1 (FAIL):** Any of checks 1-7 or 12 failed OR execution error
 
 ## CI/CD Integration
 

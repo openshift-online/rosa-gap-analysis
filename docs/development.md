@@ -19,6 +19,10 @@ scripts/
 ├── gap-ocp-gate-ack.py         # OCP admin gate acknowledgments
 ├── gap-versions-channels.py    # Version & channel availability analysis
 ├── gap-ocm-version-gate.py     # OCM version gate analysis
+├── gap-api-resources.py        # API Resources and CRD Diff Validation
+├── gap-critical-alerts.py      # Critical Alerts Diff Validation
+├── gap-cluster-install.py      # Cluster Install and Delete Validation
+├── gap-e2e-validation.py       # Target E2E Validation and alert monitoring
 ├── gap-feature-gates.py        # Feature gates analysis
 ├── gap-all.sh                  # Orchestrator
 ├── generate-combined-report.py # Combined report aggregator
@@ -30,6 +34,10 @@ scripts/
 │   ├── ocp-gate-ack.html.j2
 │   ├── versions-channels.html.j2
 │   ├── ocm-version-gate.html.j2
+│   ├── api-resources.html.j2
+│   ├── critical-alerts.html.j2
+│   ├── cluster-install.html.j2
+│   ├── e2e-validation.html.j2
 │   ├── feature-gates.html.j2
 │   ├── full-gap.html.j2
 │   └── ga-validation.html.j2

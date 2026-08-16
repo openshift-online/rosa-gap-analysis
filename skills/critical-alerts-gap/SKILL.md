@@ -1,0 +1,69 @@
+---
+name: critical-alerts-gap
+description: >
+  Compare live ROSA PrometheusRule alerts between OpenShift versions using
+  Critical Alerts snapshots. Recommends inherit vs silence vs
+  review. Informational; missing snapshots are SKIP.
+compatibility:
+  required_tools:
+    - python3
+    - curl (for Prow job-history and GCS artifact fetch)
+---
+
+# Critical Alerts Diff Validation
+
+Compare PrometheusRule alerting rules on ROSA clusters using Critical Alerts
+snapshots from Prow GCS. HCP, Classic, and OSD GCP, each compared to itself.
+OSD GCP is skipped for OpenShift 5.x.
+
+## When to Use
+
+- Identifying new critical alerts in a target OpenShift version
+- Deciding which new alerts SRE should inherit vs silence
+- Reviewing changed queries, `for` durations, or severity
+
+## Script Usage
+
+```bash
+python3 ./scripts/gap-critical-alerts.py --version 4.22
+python3 ./scripts/gap-critical-alerts.py --baseline 4.21 --target 4.22
+python3 ./scripts/gap-critical-alerts.py --baseline 4.22 --target 5.0 --topology classic
+./scripts/gap-all.sh --version 4.22 --steps critical-alerts
+```
+
+## Data Source
+
+Prow GCS artifacts from HCP, Classic, and OSD GCP core jobs. CI step `as:` name:
+
+- `rosa-gap-analysis-critical-alerts`
+
+The step runs in the rosa-e2e **post** phase while the cluster is still up,
+before deprovision. Files:
+
+- `metadata.json`
+- `alerts.json` (flattened alerting rules)
+
+Recording rules are dropped.
+
+HCP also writes the same files under `management/` from the Red Hat
+management cluster (control plane). Hosted/guest files stay at the snapshot
+root.
+
+Jobs covered: daily HCP, Classic STS, and OSD GCP periodics.
+OSD GCP is skipped for OpenShift 5.x (AWS/STS-only). Not HCP FIPS.
+`--topology hcp` is HCP vs HCP (hosted + management when present).
+`--topology classic` is Classic vs Classic. `--topology osd-gcp` is OSD GCP vs OSD GCP.
+Prow channel: GA minors use the `staging-stable` job; pre-GA minors use
+`staging-candidate` if that job has a snapshot, otherwise `staging-nightly`.
+
+## Recommendations (v1 heuristics)
+
+- **Inherit**: new critical, platform namespace (`openshift-*` / `kube-*`), runbook present
+- **Silence**: new warning/info, or non-platform namespace
+- **Review**: new critical missing inherit rules, or any expr/`for`/severity change
+- **Predicted frequency**: from `for` duration only (`<5m` high, `5m–1h` medium, `≥1h` low)
+
+## Exit Codes
+
+- `0` - Success, including SKIP when snapshots are missing
+- `1` - Execution failure

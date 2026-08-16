@@ -358,21 +358,9 @@ def find_pr_for_file_change(file_path, target_version, changed_actions):
         data = json.loads(response.read().decode('utf-8'))
 
         items = data.get('items', [])
-        if not items:
-            return (None, None)
-
-        # Look for PR that mentions the version in title
-        filename = file_path.split('/')[-1]
-        for item in items:
-            title = item.get('title', '').lower()
-            # Check if this PR mentions the version or file in title
-            if target_version in title or filename in title:
-                return (item['html_url'], item['number'])
-
-        # If no specific match, return the most recently updated PR with the version number
-        if items:
-            pr = items[0]
-            return (pr['html_url'], pr['number'])
+        matched = _match_pr_from_search_items(items, file_path, target_version, url_key='html_url')
+        if matched[0]:
+            return matched
 
     except (HTTPError, URLError, json.JSONDecodeError, KeyError, Exception):
         # API call failed, try falling back to gh CLI if available
@@ -396,22 +384,60 @@ def find_pr_for_file_change(file_path, target_version, changed_actions):
             if result.returncode == 0:
                 prs = json.loads(result.stdout)
                 if prs:
-                    filename = file_path.split('/')[-1]
-                    for pr in prs:
-                        title = pr.get('title', '').lower()
-                        if filename in title or target_version in title:
-                            return (pr['url'], pr['number'])
-
-                    # Return most recent
                     prs_sorted = sorted(prs, key=lambda x: x.get('mergedAt', ''), reverse=True)
-                    if prs_sorted:
-                        pr = prs_sorted[0]
-                        return (pr['url'], pr['number'])
+                    return _match_pr_from_search_items(
+                        prs_sorted, file_path, target_version, url_key='url'
+                    )
 
         except (subprocess.TimeoutExpired, subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
             pass
 
     return (None, None)
+
+
+def _match_pr_from_search_items(items, file_path, target_version, url_key='html_url'):
+    """
+    Select a PR from find_pr_for_file_change search results.
+
+    Prefer filename / distinctive filename tokens in the title over a bare
+    version match — many MCC PRs share the same version in the title.
+    """
+    if not items:
+        return (None, None)
+
+    filename = file_path.split('/')[-1].lower()
+    generic = {
+        'openshift', 'cloud', 'credentials', 'credential', 'policy', 'aws',
+        'sts', 'wif', 'gcp', 'operator', 'installer', 'instance', 'support',
+        'ocm', 'osd', 'shared', 'vpc', 'json', 'yaml',
+    }
+    stem = filename.replace('.json', '').replace('.yaml', '').replace('.yml', '')
+    tokens = [
+        part for part in stem.replace('-', '_').split('_')
+        if len(part) >= 4 and part not in generic
+    ]
+
+    # 1) Exact filename in title
+    for item in items:
+        title = item.get('title', '').lower()
+        if filename in title:
+            return (item.get(url_key), item.get('number'))
+
+    # 2) Distinctive filename token in title (e.g. 'karpenter')
+    for item in items:
+        title = item.get('title', '').lower()
+        if any(token in title for token in tokens):
+            return (item.get(url_key), item.get('number'))
+
+    # 3) Version in title (previous behavior)
+    for item in items:
+        title = item.get('title', '').lower()
+        if target_version in title:
+            return (item.get(url_key), item.get('number'))
+
+    # 4) Most recently updated search hit
+    pr = items[0]
+    return (pr.get(url_key), pr.get('number'))
 
 
 def validate_sts_resources(baseline_version, target_version, expected_changes=None, baseline_cr_dir=None, target_cr_dir=None):

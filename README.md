@@ -18,7 +18,7 @@ This framework helps platform teams identify IAM permission and feature gate cha
 
 ### What It Analyzes
 
-The framework performs **8 validation checks** across all scripts:
+The framework performs **12 validation checks** across all scripts:
 
 | Check # | Analysis Type | Description | Pass/Fail Impact |
 |---------|---------------|-------------|------------------|
@@ -30,6 +30,10 @@ The framework performs **8 validation checks** across all scripts:
 | **6** | Versions & Channels | Validates version availability in release channels and marketplaces | Exit 1 on FAIL |
 | **7** | OCM Version Gates | Validates OCM version gate configurations | Exit 1 on FAIL |
 | **8** | Feature Gates | Tracks feature gate changes (informational) | Always PASS |
+| **9** | API Resources and CRD Diff Validation | Compares live ROSA API resources and CRDs (HCP, Classic, OSD GCP; OSD GCP skipped for 5.x) | Always PASS (SKIP if snapshots missing) |
+| **10** | Critical Alerts Diff Validation | Compares live PrometheusRule alerts; recommends inherit / silence / review. Same topologies as Check #9. | Always PASS (SKIP if snapshots missing) |
+| **11** | Cluster Install and Delete Validation | Compares live ClusterOperator/node install health (same topologies as Check #9). Delete-duration metrics are not in the snapshot yet. | Always PASS (SKIP if snapshots missing) |
+| **12** | Target E2E Validation and alert monitoring | Target-version rosa-e2e JUnit (`junit-rosa-e2e.xml`). HCP, Classic, and OSD GCP. OSD GCP skipped for 5.x. Missing JUnit is SKIP. Failed tests FAIL. Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e. | Exit 1 on FAIL |
 
 See [Validation Checks](docs/validation-checks.md) for detailed information about each check.
 
@@ -186,6 +190,10 @@ gap-analysis/
 │   ├── gap-versions-channels.py # Version & channel availability analysis
 │   ├── gap-ocm-version-gate.py # OCM version gate analysis
 │   ├── gap-feature-gates.py # Feature gate analysis (informational)
+│   ├── gap-api-resources.py # API Resources and CRD Diff Validation
+│   ├── gap-critical-alerts.py # Critical Alerts Diff Validation
+│   ├── gap-cluster-install.py # Cluster Install and Delete Validation
+│   ├── gap-e2e-validation.py # Target E2E Validation and alert monitoring
 │   ├── gap-all.sh           # Run all analyses
 │   ├── lib/                 # Shared libraries
 │   └── prod/                # Production scripts (GA readiness validation)
@@ -222,7 +230,11 @@ Scripts are designed for CI/CD integration:
 | `gap-versions-channels.py` | Successful execution | Execution error OR validation FAIL (check 6) |
 | `gap-ocm-version-gate.py` | Successful execution | Execution error OR validation FAIL (check 7) |
 | `gap-feature-gates.py` | Always on success | Execution error only (check 8 is informational) |
-| `gap-all.sh` | All checks 1-7 pass | Any check 1-7 fails |
+| `gap-api-resources.py` | Always on success | Execution error only (check 9 is informational; missing snapshots SKIP) |
+| `gap-critical-alerts.py` | Always on success | Execution error only (check 10 is informational; missing snapshots SKIP) |
+| `gap-cluster-install.py` | Always on success | Execution error only (check 11 is informational; missing snapshots SKIP) |
+| `gap-e2e-validation.py` | PASS or SKIP (missing JUnit) | Execution error OR validation FAIL (check 12; failed e2e or alert monitoring) |
+| `gap-all.sh` | All checks 1-7 and 12 pass | Any check 1-7 or 12 fails |
 
 **Important:** Validation distinguishes between **errors** and **warnings**:
 - **ERRORS** (missing expected changes): Validation FAILS → exit 1

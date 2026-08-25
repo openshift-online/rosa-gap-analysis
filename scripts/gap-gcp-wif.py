@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from datetime import datetime
 from pathlib import Path
 # Add lib directory to path
@@ -179,40 +180,66 @@ def extract_credential_requests(version, cloud="gcp"):
 
     log_info(f"Extracting credential requests from {release_image} for cloud={cloud}")
 
-    try:
-        # Run oc adm release extract
-        cmd = [
-            'oc', 'adm', 'release', 'extract',
-            release_image,
-            '--credentials-requests',
-            f'--cloud={cloud}',
-            f'--to={temp_dir}'
-        ]
+    # Retry with exponential backoff for transient registry errors (e.g. unexpected EOF)
+    max_attempts = 3
+    backoff_delays = [15, 30, 60]
 
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=False
-        )
+    for attempt in range(1, max_attempts + 1):
+        try:
+            # Run oc adm release extract
+            cmd = [
+                'oc', 'adm', 'release', 'extract',
+                release_image,
+                '--credentials-requests',
+                f'--cloud={cloud}',
+                f'--to={temp_dir}'
+            ]
 
-        # Filter out warnings from stderr
-        stderr_lines = [line for line in result.stderr.split('\n') if 'warning:' not in line.lower()]
-        if stderr_lines and any(line.strip() for line in stderr_lines):
-            for line in stderr_lines:
-                if line.strip():
-                    print(line, file=sys.stderr)
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False
+            )
 
-        if result.returncode != 0:
-            log_error(f"Failed to extract credential requests for version {version}")
-            return None
+            # Filter out warnings from stderr
+            stderr_lines = [line for line in result.stderr.split('\n') if 'warning:' not in line.lower()]
+            if stderr_lines and any(line.strip() for line in stderr_lines):
+                for line in stderr_lines:
+                    if line.strip():
+                        print(line, file=sys.stderr)
 
-        log_success(f"Credential requests extracted to: {temp_dir}")
-        return temp_dir
+            if result.returncode == 0:
+                log_success(f"Credential requests extracted to: {temp_dir}")
+                return temp_dir
 
-    except Exception as e:
-        log_error(f"Failed to extract credential requests: {e}")
-        return None
+            # Command failed - retry if attempts remain
+            if attempt < max_attempts:
+                delay = backoff_delays[attempt - 1]
+                log_warning(f"Attempt {attempt}/{max_attempts} failed to extract credential requests for {version}")
+                log_warning(f"Retrying in {delay}s...")
+                # Clear temp dir for clean retry
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                os.makedirs(temp_dir, exist_ok=True)
+                time.sleep(delay)
+            else:
+                log_error(f"Failed to extract credential requests for {version} after {max_attempts} attempts")
+                return None
+
+        except Exception as e:
+            if attempt < max_attempts:
+                delay = backoff_delays[attempt - 1]
+                log_warning(f"Attempt {attempt}/{max_attempts} failed: {e}")
+                log_warning(f"Retrying in {delay}s...")
+                # Clear temp dir for clean retry
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                os.makedirs(temp_dir, exist_ok=True)
+                time.sleep(delay)
+            else:
+                log_error(f"Failed to extract credential requests after {max_attempts} attempts: {e}")
+                return None
+
+    return None
 
 
 def convert_credential_requests_to_policy(cr_dir):

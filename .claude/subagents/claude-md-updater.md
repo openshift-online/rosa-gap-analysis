@@ -137,7 +137,7 @@ Triggered by: scripts/gap-network.py (new file)
   Validation Checks: Add row for check #7
   Essential Commands: Add network example
   Critical Details: Update gap-all.sh orchestration
-  
+
 ✏️  Proposed Changes (keeping concise):
 
 Line 12 (Overview):

@@ -11,6 +11,7 @@ from common import log_info, log_error
 
 SIPPY_API = "https://sippy.dptools.openshift.org/api/releases"
 ACCEPTED_STREAMS_API = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted"
+RELEASE_STREAM_BASE = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestream"
 STABLE_STREAM = "4-stable"
 DEV_PREVIEW_STREAM = "4-dev-preview"
 

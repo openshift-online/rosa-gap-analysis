@@ -582,4 +582,3 @@ def load_e2e_junit_from_path(path):
             "gcs_url": str(candidate),
         },
     }
-

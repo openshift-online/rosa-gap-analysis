@@ -407,7 +407,7 @@ def check_ocm_version_gates(target_version):
             for gate in gates_data["items"]:
                 if version_prefix in gate.get("version_raw_id_prefix", ""):
                     matching_gates.append(gate)
-                    
+
         if matching_gates:
             log_success(f"Found {len(matching_gates)} configured OCM version gate(s) for {version_prefix}.x")
             return {

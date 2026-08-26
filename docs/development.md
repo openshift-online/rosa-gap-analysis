@@ -5,9 +5,10 @@ Guide for contributing to gap analysis scripts.
 ## Setup
 
 ```bash
-git clone https://github.com/your-org/gap-analysis.git
-cd gap-analysis
-pip install -r requirements.txt
+git clone https://github.com/your-org/rosa-gap-analysis.git
+cd rosa-gap-analysis
+make setup          # runtime deps + pre-commit install
+make lint           # same target Prow will run
 ```
 
 ## Structure
@@ -52,6 +53,15 @@ scripts/
 ```
 
 ## Testing
+
+Prow presubmit (once wired in `openshift/release`) runs `make lint`. Locally:
+
+```bash
+make lint                    # Python compile, ruff, shellcheck, Jinja2, orchestrator
+pre-commit run --all-files   # make lint plus whitespace/YAML/gitleaks
+```
+
+Full gap analysis still needs `oc`, OCM, and network:
 
 ```bash
 # Test scripts
@@ -115,14 +125,8 @@ podman run --rm -v $(pwd)/reports:/gap-analysis/reports gap-analysis:dev \
 ## Code Style
 
 ```bash
-# Format (optional)
-black scripts/**/*.py
-
-# Lint (optional)
-flake8 scripts/**/*.py
-
-# Shell check
-shellcheck scripts/*.sh
+make lint                    # ruff + shellcheck --severity=error + verify
+pre-commit run --all-files   # plus whitespace, YAML, gitleaks
 ```
 
 ## Adding a New Script
@@ -156,9 +160,10 @@ python3 ./scripts/new-analysis.py --baseline 4.21 --target 4.22
 
 1. Fork repository
 2. Create feature branch
-3. Make changes
-4. Test locally
-5. Submit pull request
+3. `make setup` (installs the pre-commit hook)
+4. Make changes
+5. `make lint` and `pre-commit run --all-files`
+6. Submit pull request
 
 Use conventional commits:
 ```

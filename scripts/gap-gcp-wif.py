@@ -475,7 +475,7 @@ Exit Codes:
     if target_minor_val > 0.0 and target_minor_val < 4.16:
         log_warning(f"GCP WIF was introduced in OpenShift 4.16. Target version {target} does not support GCP WIF.")
         log_info("Skipping GCP WIF analysis and generating dummy report.")
-        
+
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         report_data = {
             'type': 'GCP WIF Policy Gap Analysis',
@@ -518,7 +518,7 @@ Exit Codes:
                 'total_changes': 0
             }
         }
-        
+
         report_dir = args.report_dir
         os.makedirs(report_dir, exist_ok=True)
         json_file = os.path.join(report_dir, f"gap-analysis-gcp-wif_{baseline}_to_{target}_{timestamp}.json")
@@ -547,7 +547,7 @@ Exit Codes:
             html_file = os.path.join(report_dir, f"gap-analysis-gcp-wif_{baseline}_to_{target}_{timestamp}.html")
             generate_html_report(report_data, html_file)
             log_info(f"HTML report generated: {html_file}")
-            
+
         sys.exit(0)
 
     # Version 5.x+ is AWS/STS-only — no GCP/WIF support
@@ -728,7 +728,7 @@ Exit Codes:
             log_success(f"  Location: {mcc_ack_url}")
             log_success(f"  ✓ config.yaml: baseline version {check_2['actual_baseline']} matches expected")
             log_success(f"  ✓ CloudCredential: upgrade version validated")
-        
+
         # Log GCP Marketplace success / warn
         if gcp_marketplace_result['status'] == 'PASS':
             log_success(f"\nGCP Marketplace Enablement [PASS]")

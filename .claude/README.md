@@ -87,19 +87,18 @@ Auto-trigger on file changes to orchestrate related updates:
 
 ### 3. Hooks (`.claude/hooks/`)
 
-**`pre-commit`** - Manual validation script (can be installed as git hook)
-- Validates Python and Bash syntax
-- Checks gap script completeness (templates, skills)
-- Validates gap-all.sh orchestration
-- Checks documentation sync
-- Prevents committing reports/
-- Validates import patterns
-- Checks Jinja2 templates
+**`pre-commit`** - Wrapper around the standard [pre-commit](https://pre-commit.com/) framework (`.pre-commit-config.yaml`)
+- File hygiene (whitespace, YAML, large files, merge conflicts)
+- gitleaks
+- `make lint` (Python compile, ruff, shellcheck, Jinja2, gap-all.sh orchestration)
 
-**Note:** To use as a git hook, install it:
+**Install the git hook (preferred):**
 ```bash
-ln -sf ../../.claude/hooks/pre-commit .git/hooks/pre-commit
+make setup
+# or: pip install 'pre-commit==4.6.0' && pre-commit install
 ```
+
+The optional symlink to this file still works: it runs `pre-commit run` if available, otherwise `make lint`.
 
 ### 4. Settings (`.claude/settings.json`)
 
@@ -131,7 +130,7 @@ Minimal configuration for:
 8. ✅ Provides comprehensive change report
 
 **You commit:**
-9. ✅ `pre-commit` hook validates (if installed) or run `.claude/hooks/pre-commit` manually
+9. ✅ `pre-commit run` (or `make lint`) validates before push
 
 ### Updating an Existing Gap Script
 
@@ -274,10 +273,8 @@ Create new rule file in `.claude/rules/` and reference in `settings.json`.
 - Ensure impact classification (high vs low) is correct per `when-to-plan.md`
 
 **Pre-commit hook not running:**
-- By default, the hook is NOT installed (it's a manual validation script)
-- To install: `ln -sf ../../.claude/hooks/pre-commit .git/hooks/pre-commit`
-- Verify it's executable: `chmod +x .git/hooks/pre-commit`
-- Test manually: `.claude/hooks/pre-commit`
+- Install with `make setup` or `pip install 'pre-commit==4.6.0' && pre-commit install`
+- Test: `pre-commit run` or `make lint`
 
 **False positives in validation:**
 - Review `.claude/rules/gap-script-orchestration.md`

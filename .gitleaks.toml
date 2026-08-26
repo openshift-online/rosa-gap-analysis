@@ -1,0 +1,25 @@
+# Gitleaks config for rosa-gap-analysis
+# https://github.com/gitleaks/gitleaks
+# Runs in the local pre-commit hook (not in `make lint` / Prow).
+
+title = "gitleaks config for rosa-gap-analysis"
+
+[allowlist]
+description = "False positives and documentation examples"
+regexes = [
+    '''(?i)fake[_-]?token''',
+    '''(?i)test[_-]?secret''',
+    '''(?i)example[_-]?key''',
+    '''(?i)dummy[_-]?password''',
+    '''(?i)placeholder''',
+    '''AKIAIOSFODNN7EXAMPLE''',
+]
+stopwords = [
+    "example",
+    "test",
+    "fake",
+    "dummy",
+    "placeholder",
+    "sample",
+    "mock",
+]

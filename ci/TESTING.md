@@ -106,7 +106,7 @@ export TEST_REPO="your-user/test-managed-cluster-config"
 ./ci/prow-autofix.sh --dry-run
 ```
 
-**Expected:** 
+**Expected:**
 - Analyzes latest failure
 - Generates and validates files
 - Skips PR creation

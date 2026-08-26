@@ -155,7 +155,7 @@ User: "Add gap-network.py" [High-impact change]
 Claude: [Shows plan, gets approval, implements] +520 lines
 
 Claude: "✅ Complete! Added 520 lines across 8 files.
-         
+
          Run cleanup-analyzer to check for bloat/duplication? [y/n]"
 
 User: "y"

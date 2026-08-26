@@ -47,10 +47,10 @@ CLAUDE.md: 305 lines → Target: 250 lines
 Opportunities:
 1. Lines 45-67: Validation checks table has redundant descriptions
    → Condense to just check numbers and script names (-15 lines)
-   
+
 2. Lines 120-145: Detailed template examples
    → Move to docs/development.md, keep 1-line reference (-22 lines)
-   
+
 3. Lines 180-195: Verbose exit code explanation
    → Consolidate into single bullet point (-12 lines)
 
@@ -78,10 +78,10 @@ Unused Code Found:
 scripts/lib/ack_validation.py:
   - validate_v1_schema() (lines 145-167): 0 references (-23 lines)
   - parse_legacy_format() (lines 201-225): 0 references (-25 lines)
-  
+
 scripts/lib/reporters.py:
   - unused import: from datetime import timedelta (-1 line)
-  
+
 Total: 3 items, -49 lines
 ```
 
@@ -154,7 +154,7 @@ Documentation Issues:
 scripts/gap-aws-sts.py:
   - Line 45: TODO from 2025-08-12 (8 months old): "Optimize caching"
   - Lines 201-215: Commented-out old validation logic (15 lines)
-  
+
 docs/validation-checks.md + CLAUDE.md:
   - Validation checks table duplicated
   → Keep in docs/, reference from CLAUDE.md (-30 lines)
@@ -174,7 +174,7 @@ Organization Issues:
 
 scripts/validate_helpers.py:
   → Should be: scripts/lib/validation_helpers.py
-  
+
 scripts/templates/temp_aws_backup.j2:
   → Appears to be a backup file, not used
   → Recommend: Delete
@@ -208,12 +208,12 @@ ci/mcc-pr/ directory (818 lines):
   → Contains: create-pr.sh, validate.sh, SETUP.md
   → Not invoked by any active workflow
   → Recommendation: Remove (will ask for confirmation)
-  
+
 scripts/gap-legacy-validation.py (320 lines):
   → Contains comment: "Deprecated since 2025-12, use gap-aws-sts.py"
   → Not invoked by gap-all.sh or any CI workflow
   → Recommendation: Remove (will ask for confirmation)
-  
+
 docs/migration-from-v1.md (240 lines):
   → Documents migration from v1 to v2 (completed 6 months ago)
   → No longer relevant to current users
@@ -285,7 +285,7 @@ Triggered by: CLAUDE.md reached 305 lines (target: 250)
   - Duplication: 2 patterns affecting 4 files
   - Bloated files: 1 file >500 lines
   - Deprecated/legacy items: 3 files, 450 lines
-  
+
 Total potential reduction: 187 lines (6.8% of codebase)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -480,7 +480,7 @@ Results:
   - CLAUDE.md: 305 → 250 lines (-55 ✓)
   - Removed unused code: -48 lines
   - Consolidated duplication: -45 lines
-  
+
 Total reduction: 148 lines (5.4% of codebase)
 
 Files modified:

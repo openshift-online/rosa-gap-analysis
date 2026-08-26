@@ -114,7 +114,7 @@ def analyze_version_gates(gates, baseline_minor, target_minor):
     for gate in gates:
         prefix = gate.get("version_raw_id_prefix", "")
         value = gate.get("value", "")
-        
+
         # Check if matches baseline
         if baseline_minor == prefix or (value and baseline_pattern.search(value)):
             baseline_gates.append(gate)

@@ -1,15 +1,44 @@
+# Pre-commit hooks for rosa-gap-analysis
+#
+# INSTALL
+#   pip install 'pre-commit==4.6.0' && pre-commit install
+#   or: make setup
+#
+# USAGE
+#   pre-commit run              # staged files (developer / agent)
+#   pre-commit run --all-files  # full repo
+#
+# CI RELATIONSHIP (same as OSD operators / certman-operator)
+#   These hooks mirror `make lint`. Prow runs `make lint`, not this binary.
+#   Pre-commit is developer convenience. CI is the merge gate.
+#
+# BYPASS
+#   Skip one hook: SKIP=hook-id git commit
+#   Never use: git commit --no-verify
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
     hooks:
       - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
       - id: end-of-file-fixer
       - id: check-yaml
         args: ['--allow-multiple-documents']
       - id: check-added-large-files
         args: ['--maxkb=500']
       - id: check-merge-conflict
-  - repo: https://github.com/shellcheck-py/shellcheck-py
-    rev: v0.10.0.1
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.18.0
     hooks:
-      - id: shellcheck
+      - id: gitleaks
+        args: ['--config=.gitleaks.toml']
+
+  - repo: local
+    hooks:
+      - id: make-lint
+        name: make lint
+        language: system
+        entry: bash -c 'make lint'
+        pass_filenames: false

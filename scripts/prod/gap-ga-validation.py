@@ -135,7 +135,7 @@ class GAReadinessValidator:
                 return
 
             cli_version = version_check.stdout.strip().split("\n")[0]
-            
+
             channels = ["candidate", "fast", "stable"]
             found_channels = []
             missing_channels = []
@@ -298,22 +298,22 @@ class GAReadinessValidator:
         name = "SOP & Runbooks Update Status"
         major_minor = ".".join(self.version.split(".")[:2])
         target_url = "https://github.com/openshift/ops-sop/blob/master/v4/howto/gap-analysis.md"
-        
+
         content = None
         source_info = f"remote git: {target_url}"
         mtime = 0
-        
+
         git_urls = [
             "git@github.com:openshift/ops-sop.git",
             "https://github.com/openshift/ops-sop.git"
         ]
-        
+
         git_errors = []
         for git_url in git_urls:
             with tempfile.TemporaryDirectory() as temp_dir:
                 try:
                     clone_cmd = [
-                        "git", "clone", "--depth", "1", "--no-checkout", 
+                        "git", "clone", "--depth", "1", "--no-checkout",
                         git_url, temp_dir
                     ]
                     proc_clone = subprocess.run(
@@ -334,7 +334,7 @@ class GAReadinessValidator:
                     else:
                         err_msg_show = proc_show.stderr.strip() if proc_show.stderr else "No stderr output"
                         git_errors.append(f"git show origin/master failed (exit code {proc_show.returncode}): {err_msg_show}")
-                        
+
                         show_cmd_main = ["git", "show", "origin/main:v4/howto/gap-analysis.md"]
                         proc_show_main = subprocess.run(
                             show_cmd_main, capture_output=True, text=True, check=False, cwd=temp_dir
@@ -354,7 +354,7 @@ class GAReadinessValidator:
                     else:
                         err_msg_log = proc_log.stderr.strip() if proc_log.stderr else "No stderr output"
                         git_errors.append(f"git log origin/master failed (exit code {proc_log.returncode}): {err_msg_log}")
-                        
+
                         log_cmd_main = ["git", "log", "-1", "--format=%ct", "origin/main", "--", "v4/howto/gap-analysis.md"]
                         proc_log_main = subprocess.run(
                             log_cmd_main, capture_output=True, text=True, check=False, cwd=temp_dir
@@ -364,7 +364,7 @@ class GAReadinessValidator:
                         else:
                             err_msg_log_main = proc_log_main.stderr.strip() if proc_log_main.stderr else "No stderr output"
                             git_errors.append(f"git log origin/main failed (exit code {proc_log_main.returncode}): {err_msg_log_main}")
-                    
+
                     if content:
                         source_info = f"remote git: {git_url}"
                         break
@@ -375,8 +375,8 @@ class GAReadinessValidator:
         if not content:
             errors_str = " | ".join(git_errors)
             self.log_status(
-                name, 
-                "WARN", 
+                name,
+                "WARN",
                 f"Could not retrieve Gap Analysis SOP using remote git fetch. Details: {errors_str}"
             )
             return
@@ -385,7 +385,7 @@ class GAReadinessValidator:
         pattern = rf"(?<!\.)\b{re.escape(major_minor)}\b"
         regex_passed = bool(re.search(pattern, content))
         regex_status = "PASS" if regex_passed else "FAIL"
-        
+
         # Fetch GA dates from Sippy API to determine version reference date
         ga_dates = {}
         try:
@@ -393,11 +393,11 @@ class GAReadinessValidator:
             ga_dates = fetch_sippy_ga_dates() or {}
         except Exception:
             pass
-        
+
         ga_date_str = ga_dates.get(major_minor)
         ref_time = None
         ref_name = "today"
-        
+
         if ga_date_str:
             try:
                 if ga_date_str.endswith("Z"):
@@ -411,7 +411,7 @@ class GAReadinessValidator:
         # Freshness Verification
         date_passed = False
         date_msg = ""
-        
+
         if mtime > 0:
             file_dt = datetime.datetime.fromtimestamp(mtime, datetime.timezone.utc)
             file_date_str = file_dt.strftime('%Y-%b-%d')
@@ -419,7 +419,7 @@ class GAReadinessValidator:
                 ga_end_time = ref_time + 16 * 30.5 * 86400
                 ga_end_dt = datetime.datetime.fromtimestamp(ga_end_time, datetime.timezone.utc)
                 ga_end_str = ga_end_dt.strftime('%Y-%b-%d')
-                
+
                 days_relative = (mtime - ref_time) / 86400
                 date_passed = (days_relative >= -30) and (mtime <= ga_end_time)
                 if date_passed:
@@ -445,14 +445,14 @@ class GAReadinessValidator:
                     date_msg = f"Updated {file_date_str}, which is {days_since_update:.1f} days ago (outside 30 days of today)."
         else:
             date_msg = "Could not determine file commit timestamp from remote repository."
-        
+
         date_status = "PASS" if date_passed else "FAIL"
-        
+
         detailed_explanation = (
             f"\n   -> Check 1: Regex Version Boundary Check : {regex_status} (matches exact major/minor boundaries)"
             f"\n   -> Check 2: 30-Day Freshness Check        : {date_status} ({date_msg})"
         )
-        
+
         if regex_passed and date_passed:
             self.log_status(
                 name,
@@ -600,7 +600,7 @@ class GAReadinessValidator:
             check_fn()
 
         validation_result = "PASS" if self.critical_failures == 0 else "FAIL"
-        
+
         now = datetime.datetime.now(datetime.timezone.utc)
         report_data = {
             "type": "GA Readiness Validation",

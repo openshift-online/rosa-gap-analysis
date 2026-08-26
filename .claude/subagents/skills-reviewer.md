@@ -121,10 +121,10 @@ For existing skills:
 - ## What This Analyzes
 - - IAM permission changes
 + ## What This Analyzes (Checks 1-2)
-+ 
++
 + **Check #1: AWS STS Resources**
 + - IAM permission changes in resources/sts/{version}/
-+ 
++
 + **Check #2: AWS STS Admin Acknowledgments**
 + - Admin ack files in deploy/osd-cluster-acks/sts/{version}/
 ```
@@ -159,11 +159,11 @@ Triggered by: scripts/gap-network.py (new file)
 skills/network-gap/SKILL.md:
   ❌ File does not exist
   ✏️  Creating from template...
-  
+
 skills/full-gap-analysis/SKILL.md:
   ⚠️  Line 33: Update check count from 6 to 7
   ⚠️  Line 98: Add network analysis to workflow
-  
+
 skills/feature-gates-gap/SKILL.md:
   ⚠️  Line 16: Update check number from "Check 6" to "Check 7"
 

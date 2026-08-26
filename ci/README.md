@@ -92,7 +92,22 @@ ls -lh reports/
 
 ## CI Integration
 
-This image is used by Prow/ci-operator jobs defined in `.prow/` (when added). Example usage:
+Prow periodics run `gap-all.sh` using this image (`build_root.project_image.dockerfile_path: ci/Containerfile`).
+
+PR lint follows certman-operator: Prow runs `make lint` (not the pre-commit binary). Add this to `ci-operator/config/openshift-online/rosa-gap-analysis/openshift-online-rosa-gap-analysis-main.yaml` in [openshift/release](https://github.com/openshift/release), then `make update`:
+
+```yaml
+tests:
+- as: lint
+  commands: make lint
+  container:
+    from: src
+  skip_if_only_changed: ^docs/|\.md$|^(?:\.gitignore|OWNERS|LICENSE)$
+```
+
+Do not install pre-commit in this Containerfile. Pin ruff and shellcheck-py here so Prow `make lint` does not need PyPI. `hack/ensure-lint-tools.sh` is a local fallback only.
+
+Example gap-analysis test stanzas (periodics / manual jobs):
 
 ```yaml
 # In ci-operator config
@@ -377,7 +392,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 # [INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly...
 # [INFO] Most recent job status: success (ID: 2043621071365607424)
 # [SUCCESS] ✅ Most recent job is successful or pending
-# [INFO] 
+# [INFO]
 # [INFO] Most recent job status:
 #   - Job 2043621071365607424: success
 # [INFO]
@@ -580,7 +595,7 @@ For manual control and review, use the two-step workflow with `analyze-prow-fail
 
 ### Quick Start
 
-**Prerequisites:** 
+**Prerequisites:**
 - `python3`, `PyYAML`, `jq`, `yq`, `gh` CLI
 - **REQUIRED:** `GH_TOKEN` environment variable (see [Configuration](#configuration) below)
 - `yq` required for WIF template validation

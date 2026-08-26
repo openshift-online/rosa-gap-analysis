@@ -76,7 +76,7 @@ def parse_build_log(log_path):
                 'type': 'Build Failure',
                 'component': component,
                 'detail': f"Build of image '{component}' failed during the run.",
-                'log_url': metrics.get('build_log_url')                
+                'log_url': metrics.get('build_log_url')
             })
 
         # 5. Extract retry events
@@ -116,7 +116,7 @@ def parse_build_log(log_path):
             error_summary = "\n".join(error_lines[:20])
             if len(error_lines) > 20:
                 error_summary += f"\n... and {len(error_lines) - 20} more error lines."
-            
+
             metrics['failures'].append({
                 'type': 'Log Errors Detected',
                 'component': 'Build Log',

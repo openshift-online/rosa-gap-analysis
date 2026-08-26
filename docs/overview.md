@@ -100,7 +100,7 @@ fi
 
 **[managed-cluster-config](https://github.com/openshift/managed-cluster-config) Validation:**
 - Uses `git clone --sparse-checkout` to efficiently fetch only needed directories
-- Downloads only `resources/sts/{version}` or `resources/wif/{version}` 
+- Downloads only `resources/sts/{version}` or `resources/wif/{version}`
 - Compares [managed-cluster-config](https://github.com/openshift/managed-cluster-config) policies against OCP release changes
 - All file discovery is dynamic - no hardcoded file lists
 

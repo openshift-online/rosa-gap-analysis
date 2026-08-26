@@ -1,0 +1,14 @@
+[tool.ruff]
+target-version = "py39"
+line-length = 120
+src = ["scripts", "ci"]
+extend-exclude = [".claude", "skills"]
+
+[tool.ruff.lint]
+# Runtime-breakers only (undefined names / syntax). No full style rewrite.
+select = [
+    "E9",
+    "F63",
+    "F7",
+    "F82",
+]

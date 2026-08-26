@@ -7,9 +7,9 @@ Automated tools and AI-assisted analysis for comparing cloud credential policies
 ## Quick Start
 
 ```bash
-make setup       # Install Python dependencies
-make test        # Run tests
-make lint        # Run linters
+make setup       # Install Python deps and pre-commit hook
+make lint        # Static checks (same target as Prow)
+make test        # Unit tests (when tests/ exists)
 ```
 
 ## Overview

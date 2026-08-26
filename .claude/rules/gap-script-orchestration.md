@@ -38,7 +38,7 @@ You MUST:
    The gap-script-orchestrator subagent can handle orchestrating all related
    changes: templates, gap-all.sh, generate-combined-report.py, skills, and
    documentation.
-   
+
    Would you like me to invoke it?
    ```
 
@@ -270,18 +270,18 @@ def main():
     parser.add_argument('--report-dir', default='reports', help='Report directory')
     parser.add_argument('--verbose', action='store_true', help='Verbose output')
     args = parser.parse_args()
-    
+
     # Version resolution (includes special mappings like 4.22 → 5.0)
     baseline, target = resolve_gap_versions(
         version=args.version, baseline=args.baseline, target=args.target
     )
-    
+
     # Check dependencies
     check_command('oc')  # or other required tools
-    
+
     # Perform analysis
     # ...
-    
+
     # Generate reports
     template_data = {
         'type': '<Analysis Type>',
@@ -290,10 +290,10 @@ def main():
         'comparison': comparison_result,
         'validation': validation_result
     }
-    
+
     generate_html_report('<type>', template_data, args.report_dir)
     generate_json_report('<type>', template_data, args.report_dir)
-    
+
     # Exit code logic
     if validation_failed:
         sys.exit(1)

@@ -577,7 +577,7 @@ Exit Codes:
             log_success(f"  Location: {mcc_ack_url}")
             log_success(f"  ✓ config.yaml: baseline version {check_2['actual_baseline']} matches expected")
             log_success(f"  ✓ CloudCredential: upgrade version validated")
-        
+
         # Log AWS Marketplace success / warn
         if aws_marketplace_result['status'] == 'PASS':
             log_success(f"\nAWS Marketplace Enablement [PASS]")

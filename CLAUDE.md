@@ -67,6 +67,10 @@ Claude follows an impact-based approach in this repository:
 ## Essential Commands
 
 ```bash
+# Lint (same as Prow `make lint`)
+make setup
+make lint
+
 # Run all analyses (auto-detects latest stable → candidate)
 ./scripts/gap-all.sh
 

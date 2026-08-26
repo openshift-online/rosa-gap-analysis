@@ -4,7 +4,7 @@ OpenShift Gap Analysis Framework for comparing cloud credential policies and fea
 
 ## What It Does
 
-Identifies changes between OpenShift versions through 8 validation checks:
+Identifies changes between OpenShift versions through 12 validation checks:
 
 **Checks 1-2: AWS STS Validation**
 - **Check 1:** AWS STS Resources - Validates policy files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config)
@@ -25,6 +25,18 @@ Identifies changes between OpenShift versions through 8 validation checks:
 
 **Check 8: Feature Gates (Informational)**
 - **Check 8:** Feature Gates - Tracks feature additions, removals, and default enablement changes (informational only, always PASS)
+
+**Check 9: API Resources and CRD Diff Validation (Informational)**
+- **Check 9:** API Resources and CRD Diff Validation - Compares live ROSA API resources and CRDs (HCP, Classic, and OSD GCP; OSD GCP skipped for 5.x; informational; SKIP if snapshots are missing)
+
+**Check 10: Critical Alerts Diff Validation (Informational)**
+- **Check 10:** Critical Alerts Diff Validation - Compares live PrometheusRule alerts and recommends inherit / silence / review (informational; SKIP if snapshots are missing)
+
+**Check 11: Cluster Install and Delete Validation (Informational)**
+- **Check 11:** Cluster Install and Delete Validation - Compares live ClusterOperator/node install health from rosa-e2e post-phase snapshots (HCP, Classic, and OSD GCP; OSD GCP skipped for 5.x; informational; SKIP if snapshots are missing). Delete-duration metrics are not in the snapshot yet.
+
+**Check 12: Target E2E Validation and alert monitoring**
+- **Check 12:** Target E2E Validation and alert monitoring - Consumes target-version rosa-e2e JUnit from HCP, Classic, and OSD GCP. Failed tests FAIL. Missing JUnit is SKIP. OSD GCP is skipped for OpenShift 5.x. Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.
 
 ## How It Works
 
@@ -107,6 +119,14 @@ fi
 
 **OCM Version Gates:**
 - OCM API (`/api/clusters_mgmt/v1/version_gates`) via `ocm` CLI - Version gate configurations (optional, graceful fallback)
+
+**API Resources and CRD:**
+- Prow GCS artifacts from live HCP, Classic, and OSD GCP cluster snapshots
+- HCP, Classic, and OSD GCP live cluster discovery + CRD lists (OSD GCP skipped for 5.x)
+
+**Critical Alerts:**
+- Prow GCS artifacts from live HCP, Classic, and OSD GCP PrometheusRule snapshots
+- Flattened PrometheusRule alerting rules (HCP, Classic, and OSD GCP; OSD GCP skipped for 5.x)
 
 ## Implementation Details
 

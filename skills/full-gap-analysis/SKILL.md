@@ -4,7 +4,7 @@ description: >
   Comprehensive gap analysis between OpenShift versions covering AWS STS policies,
   GCP WIF policies, feature gates, and OCP admin gate acknowledgments. Use when
   performing complete version upgrade assessment for managed OpenShift (OSD, ROSA).
-  Exits 1 if any validation check (CHECK #1-7) fails; exits 0 if all checks pass. CHECK #8 (Feature Gates) is Info only.
+  Exits 1 if any validation check (CHECK #1-7 or #12) fails; exits 0 if all checks pass. CHECK #8 (Feature Gates), CHECK #9 (API Resources and CRD), CHECK #10 (Critical Alerts), and CHECK #11 (Cluster Install) are Info only.
 compatibility:
   required_tools:
     - oc
@@ -53,6 +53,15 @@ Automatically analyzes all of:
    - Missing acknowledgment files
    - Unacknowledged gates that would block upgrades
    - Upgrade readiness validation
+
+5. **Live ROSA cluster snapshots (informational)**
+   - API Resources and CRD Diff Validation (Check #9)
+   - Critical Alerts Diff Validation (Check #10)
+   - Cluster Install and Delete Validation (Check #11)
+
+6. **Target E2E Validation and alert monitoring (Check #12)**
+   - Target-version rosa-e2e JUnit
+   - Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e
 
 The script runs all analyses and reports if differences exist in any area.
 
@@ -120,7 +129,7 @@ The script:
 - Generates JSON reports for each analysis (used for combined report)
 - Generates combined report aggregating all analyses (HTML, JSON)
 - Logs detected differences to stdout/stderr
-- Exits 1 if any validation check (CHECK #1-7) fails
+- Exits 1 if any validation check (CHECK #1-7 or #12) fails
 - Exits 0 only when all validation checks pass
 - Also exits 1 on execution failures (missing tools, network errors, etc.)
 
@@ -129,6 +138,10 @@ The script:
 - `reports/gap-analysis-gcp-wif_*.json` (individual JSON only)
 - `reports/gap-analysis-feature-gates_*.json` (individual JSON only)
 - `reports/gap-analysis-ocp-gate-ack_*.json` (individual JSON only)
+- `reports/gap-analysis-api-resources_*.json` (individual JSON only)
+- `reports/gap-analysis-critical-alerts_*.json` (individual JSON only)
+- `reports/gap-analysis-cluster-install_*.json` (individual JSON only)
+- `reports/gap-analysis-e2e-validation_*.json` (individual JSON only)
 - `reports/gap-analysis-full_*.{html,json}` (combined report with all analyses)
 
 **Use in CI/CD:**

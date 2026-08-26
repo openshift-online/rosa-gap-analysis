@@ -42,7 +42,7 @@ Claude follows an impact-based approach in this repository:
 ## Architecture
 
 **3-Layer Design:**
-1. Individual analyzers (`scripts/gap-*.py`) - AWS STS, GCP WIF, OCP Admin Gates, Versions & Channels, OCM Version Gate, Feature Gates
+1. Individual analyzers (`scripts/gap-*.py`) - AWS STS, GCP WIF, OCP Admin Gates, Versions & Channels, OCM Version Gate, API Resources and CRD, Critical Alerts, Cluster Install, Target E2E Validation, Feature Gates
 2. Orchestrator (`scripts/gap-all.sh`) - Runs all analyzers, generates combined reports
 3. Shared libraries (`scripts/lib/`, `ci/lib/`) - Version resolution, validation, reporting, CI utilities
 
@@ -51,15 +51,16 @@ Claude follows an impact-based approach in this repository:
 - Sippy API → feature gate data and version resolution
 - `managed-cluster-config` GitHub repo → validates policy files and acknowledgments
 - OCM CLI (`ocm`) → channel data, ROSA Classic marketplace availability, version gate information (optional, graceful fallback)
+- Prow GCS → live API Resources and CRD, PrometheusRule alerts, ClusterOperator/node snapshots, and `junit-rosa-e2e.xml` from HCP, Classic, and OSD GCP clusters. Snapshot jobs: GA minors use `staging-stable`; pre-GA minors use `staging-candidate` if that job has a snapshot, otherwise `staging-nightly`. OSD GCP is skipped for OpenShift 5.x (AWS/STS-only).
 - ROSA CLI (`rosa`) → ROSA HCP and OSD GCP marketplace availability (optional, graceful fallback)
 
 **Key Patterns:**
-- **Exit codes**: Checks 1-7 exit 1 on validation FAIL; CHECK #8 (Feature Gates) exits 0 even when differences found (informational only); all scripts exit 1 on execution errors
+- **Exit codes**: Checks 1-7 and CHECK #12 (Target E2E Validation) exit 1 on validation FAIL; CHECK #8 (Feature Gates), CHECK #9 (API Resources and CRD Diff Validation), CHECK #10 (Critical Alerts Diff Validation), and CHECK #11 (Cluster Install and Delete Validation) exit 0 even when differences are found (informational only); missing snapshots/JUnit for checks 9, 10, 11, and 12 are SKIP; all scripts exit 1 on execution errors
 - **Version resolution**: CLI flags > env vars > auto-detect (Sippy API)
 - **Reports**: All scripts generate HTML/JSON simultaneously using Jinja2 templates
-- **Validation**: 8 globally numbered checks; checks 1-7 are standard (can FAIL); CHECK #8 (Feature Gates) is informational only and always executes last
+- **Validation**: 12 globally numbered checks; checks 1-7 and CHECK #12 (Target E2E Validation) are standard (can FAIL); CHECK #8 (Feature Gates), CHECK #9 (API Resources and CRD Diff Validation), CHECK #10 (Critical Alerts Diff Validation), and CHECK #11 (Cluster Install and Delete Validation) are informational only. Feature Gates always executes last.
 - **GA Readiness Validation**: Standalone script (`scripts/prod/gap-ga-validation.py`) for SREs to run manually; not part of CI pipeline
-- **5.x is AWS/STS-only**: All GCP/WIF checks are skipped for 5.x+ targets. Use `is_version_5x()` from `common.py`. OSD GCP skip is **per-version** (a 4.x baseline still gets GCP checked even when target is 5.x). Applies to `gap-gcp-wif.py`, `gap-ocm-version-gate.py`, `gap-versions-channels.py`, and `gap-ga-validation.py`
+- **5.x is AWS/STS-only**: All GCP/WIF checks are skipped for 5.x+ versions. Use `is_version_5x()` from `common.py`. OSD GCP skip is **per-version** (a 4.x baseline still gets GCP marketplace/WIF checked even when target is 5.x). Applies to `gap-gcp-wif.py`, `gap-ocm-version-gate.py`, `gap-versions-channels.py`, and `gap-ga-validation.py`. Checks #9–#12 compare `--topology hcp`, `--topology classic`, and `--topology osd-gcp`, each to itself. OSD GCP snapshots/JUnit are skipped when either compared minor is 5.x. Missing snapshots/JUnit → SKIP. 5.0 is treated as another OpenShift version.
 - **GA-aware channel checking**: `gap-versions-channels.py` checks all channels (candidate, fast, stable, eus) for GA versions but only candidate for pre-GA. This applies to both channel availability AND marketplace checks. Channel availability FAILs for GA or next-after-GA targets, WARNs for further-out dev versions
 - **Marketplace validation**: Three categories — **ROSA Classic** (OCM API `rosa_enabled`), **ROSA HCP** (`rosa list versions --hosted-cp`), **OSD GCP** (OCM API `gcp_marketplace_enabled`, 4.x only, skipped per-version for 5.x). GA severity: ROSA HCP → FAIL (all), ROSA Classic → FAIL (4.x) / WARN (5.x), OSD GCP → FAIL (4.x only). Non-GA is informational only
 
@@ -89,6 +90,14 @@ BASE_VERSION=4.21 TARGET_VERSION=NIGHTLY ./scripts/gap-all.sh
 # Individual analysis (examples)
 python3 ./scripts/gap-aws-sts.py --version 4.22
 python3 ./scripts/gap-aws-sts.py --baseline 4.21 --target 4.22
+python3 ./scripts/gap-api-resources.py --version 4.22
+python3 ./scripts/gap-api-resources.py --baseline 4.21 --target 4.22 --topology hcp
+python3 ./scripts/gap-critical-alerts.py --version 4.22
+python3 ./scripts/gap-critical-alerts.py --baseline 4.21 --target 4.22 --topology hcp
+python3 ./scripts/gap-cluster-install.py --version 4.22
+python3 ./scripts/gap-cluster-install.py --baseline 4.21 --target 4.22 --topology hcp
+python3 ./scripts/gap-e2e-validation.py --version 4.22
+python3 ./scripts/gap-e2e-validation.py --baseline 4.21 --target 4.22 --topology hcp
 
 # GA Readiness Validation (standalone, run manually by SREs - see docs/ga-readiness-validation.md)
 python3 ./scripts/prod/gap-ga-validation.py --version 4.22
@@ -121,6 +130,10 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 | **6** | gap-versions-channels.py | Version availability across OCM channels (candidate/fast/stable/eus for GA, candidate-only for pre-GA), marketplace: ROSA Classic (OCM API, FAIL 4.x / WARN 5.x), ROSA HCP (`rosa` CLI, FAIL), OSD GCP (OCM API, FAIL, **4.x only, skipped for 5.x+**). Channel FAIL: GA or next-after-GA target not in any channel. | Yes |
 | **7** | gap-ocm-version-gate.py | OCM version gate existence, configurations, and metadata for target OCP versions (compared against baseline version gates). **WIF gate excluded from comparison for 5.x+ targets.** Fallback gracefully if OCM offline token / CLI is absent. | Yes |
 | **8** | gap-feature-gates.py | Feature gate changes (Info only, always executed last). **Z-stream behavior**: When comparing z-stream versions (e.g., 4.21.15 → 4.21.16), shows default feature gates instead of differences. | No |
+| **9** | gap-api-resources.py | Live ROSA API Resources and CRD from Prow GCS snapshots (Info only). HCP, Classic, and OSD GCP, each compared to itself. OSD GCP skipped for 5.x. Missing snapshots → SKIP. | No |
+| **10** | gap-critical-alerts.py | Live ROSA PrometheusRule alerts from Prow GCS snapshots (Info only). Inherit/silence/review heuristics. Same topologies as Check #9. Missing snapshots → SKIP. | No |
+| **11** | gap-cluster-install.py | Live ROSA ClusterOperator/node install health from Prow GCS snapshots (Info only). Same topologies as Check #9. Missing snapshots → SKIP. Delete-duration metrics are not in the snapshot yet. | No |
+| **12** | gap-e2e-validation.py | Target-version rosa-e2e JUnit and alert monitoring (standard). HCP, Classic, and OSD GCP JUnit. OSD GCP skipped for 5.x. Missing JUnit → SKIP. Failed tests → FAIL. Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e (September). | Yes |
 
 **Standalone (not in CI pipeline):**
 
@@ -265,6 +278,7 @@ from reporters import generate_html_report, generate_json_report
 - `reporters.py` - Multi-format report generation
 - `ack_validation.py` - managed-cluster-config validation logic
 - `marketplace.py` - AWS/GCP marketplace enablement checks (used by gap-aws-sts, gap-gcp-wif, gap-ga-validation)
+- `prow_artifacts.py` - Prow GCS snapshot/JUnit fetch for Checks #9-12
 - `logging.sh` - Bash logging functions
 - `openshift-releases.sh` - Bash version resolution (includes `resolve_openshift_version()`, `get_latest_version_for_line()`, `get_previous_z_stream_version()`, `get_all_minor_versions_from_accepted_streams()`)
 - `ci/lib/failure-parser.sh` - CI-specific Prow failure parsing utilities

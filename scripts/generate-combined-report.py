@@ -145,7 +145,11 @@ def find_latest_reports(baseline, target, report_dir='reports'):
         'feature_gates': None,
         'ocp_gate_ack': None,
         'ocm_version_gate': None,
-        'versions_channels': None
+        'versions_channels': None,
+        'api_resources': None,
+        'critical_alerts': None,
+        'cluster_install': None,
+        'e2e_validation': None,
     }
 
     # Find AWS STS report
@@ -198,6 +202,29 @@ def find_latest_reports(baseline, target, report_dir='reports'):
     vc_files = sorted(glob.glob(vc_pattern))
     if vc_files:
         reports['versions_channels'] = vc_files[-1]  # Latest
+
+    # Find API Resources and CRD report (uses minor versions)
+    ar_pattern = os.path.join(report_dir, f"gap-analysis-api-resources_{baseline_minor}_to_{target_minor}_*.json")
+    ar_files = sorted(glob.glob(ar_pattern))
+    if ar_files:
+        reports['api_resources'] = ar_files[-1]
+
+    # Find Critical Alerts report (uses minor versions)
+    ca_pattern = os.path.join(report_dir, f"gap-analysis-critical-alerts_{baseline_minor}_to_{target_minor}_*.json")
+    ca_files = sorted(glob.glob(ca_pattern))
+    if ca_files:
+        reports['critical_alerts'] = ca_files[-1]
+
+    # Find Cluster Install report (uses minor versions)
+    ci_pattern = os.path.join(report_dir, f"gap-analysis-cluster-install_{baseline_minor}_to_{target_minor}_*.json")
+    ci_files = sorted(glob.glob(ci_pattern))
+    if ci_files:
+        reports['cluster_install'] = ci_files[-1]
+
+    ev_pattern = os.path.join(report_dir, f"gap-analysis-e2e-validation_{baseline_minor}_to_{target_minor}_*.json")
+    ev_files = sorted(glob.glob(ev_pattern))
+    if ev_files:
+        reports['e2e_validation'] = ev_files[-1]
 
     return reports
 
@@ -255,16 +282,33 @@ def main():
     }
 
     # Helper to load status check data for fallback messages
-    def get_status_msg(check_num, default_msg):
+    def load_status_check(check_num):
         status_file = os.path.join(args.report_dir, f"status-check-{check_num}.json")
         if os.path.exists(status_file):
             try:
                 with open(status_file, 'r') as f:
-                    status_data = json.load(f)
-                    return status_data.get('details', {}).get('message', default_msg)
+                    return json.load(f)
             except Exception:
                 pass
+        return None
+
+    def get_status_msg(check_num, default_msg):
+        status_data = load_status_check(check_num)
+        if status_data:
+            return status_data.get('details', {}).get('message', default_msg)
         return default_msg
+
+    def fallback_validation_result(check_num, default='SKIP'):
+        """Preserve FAIL from a crashed check; SKIP only when the check did not run."""
+        status_data = load_status_check(check_num)
+        if not status_data:
+            return default
+        status = status_data.get('status') or default
+        if status in ('FAIL', 'ERROR'):
+            return 'FAIL'
+        if status in ('PASS', 'SKIP', 'WARNING'):
+            return status
+        return default
 
     # Load AWS STS data
     if reports['aws_sts']:
@@ -358,6 +402,119 @@ def main():
         with open(reports['versions_channels'], 'r') as f:
             report_data['versions_channels'] = json.load(f)
         log_info(f"Loaded Versions & Channels report: {reports['versions_channels']}")
+
+    # Load API Resources and CRD data
+    if reports['api_resources']:
+        with open(reports['api_resources'], 'r') as f:
+            report_data['api_resources'] = json.load(f)
+        log_info(f"Loaded API Resources and CRD report: {reports['api_resources']}")
+    else:
+        err_msg = get_status_msg(9, "API Resources and CRD Diff Validation skipped or no snapshots found")
+        report_data['api_resources'] = {
+            'validation_result': fallback_validation_result(9),
+            'summary': {
+                'new_api_resources': 0,
+                'removed_api_resources': 0,
+                'api_version_changes': 0,
+                'new_crds': 0,
+                'removed_crds': 0,
+                'crd_version_changes': 0,
+                'deprecated_crds': 0,
+                'managed_new_crds': 0,
+                'managed_deprecated_crds': 0,
+                'managed_removed_apis': 0,
+                'compared_topologies': [],
+                'skipped_topologies': ['hcp', 'classic', 'osd-gcp'],
+                'compared_display_names': [],
+                'skipped_display_names': ['HCP hosted (data plane)', 'Classic', 'OSD GCP'],
+            },
+            'topologies': [],
+            'error_message': err_msg,
+            'note': err_msg,
+        }
+
+    # Load Critical Alerts data
+    if reports['critical_alerts']:
+        with open(reports['critical_alerts'], 'r') as f:
+            report_data['critical_alerts'] = json.load(f)
+        log_info(f"Loaded Critical Alerts report: {reports['critical_alerts']}")
+    else:
+        err_msg = get_status_msg(10, "Critical Alerts Diff Validation skipped or no snapshots found")
+        report_data['critical_alerts'] = {
+            'validation_result': fallback_validation_result(10),
+            'summary': {
+                'new_critical': 0,
+                'new_other': 0,
+                'removed': 0,
+                'modified': 0,
+                'inherit': 0,
+                'silence': 0,
+                'review': 0,
+                'compared_topologies': [],
+                'skipped_topologies': ['hcp', 'classic', 'osd-gcp'],
+                'compared_display_names': [],
+                'skipped_display_names': ['HCP hosted (data plane)', 'Classic', 'OSD GCP'],
+            },
+            'topologies': [],
+            'error_message': err_msg,
+            'note': err_msg,
+        }
+
+    # Load Cluster Install data
+    if reports['cluster_install']:
+        with open(reports['cluster_install'], 'r') as f:
+            report_data['cluster_install'] = json.load(f)
+        log_info(f"Loaded Cluster Install report: {reports['cluster_install']}")
+    else:
+        err_msg = get_status_msg(11, "Cluster Install and Delete Validation skipped or no snapshots found")
+        report_data['cluster_install'] = {
+            'validation_result': fallback_validation_result(11),
+            'summary': {
+                'new_operators': 0,
+                'removed_operators': 0,
+                'newly_degraded': 0,
+                'newly_unavailable': 0,
+                'recovered_degraded': 0,
+                'recovered_unavailable': 0,
+                'newly_notready_nodes': 0,
+                'status_changed': 0,
+                'compared_topologies': [],
+                'skipped_topologies': ['hcp', 'classic', 'osd-gcp'],
+                'compared_display_names': [],
+                'skipped_display_names': ['HCP hosted (data plane)', 'Classic', 'OSD GCP'],
+            },
+            'topologies': [],
+            'error_message': err_msg,
+            'note': err_msg,
+        }
+
+    if reports['e2e_validation']:
+        with open(reports['e2e_validation'], 'r') as f:
+            report_data['e2e_validation'] = json.load(f)
+        log_info(f"Loaded Target E2E Validation report: {reports['e2e_validation']}")
+    else:
+        err_msg = get_status_msg(12, "Target E2E Validation skipped or no JUnit found")
+        report_data['e2e_validation'] = {
+            'validation_result': fallback_validation_result(12),
+            'summary': {
+                'tests': 0,
+                'failures': 0,
+                'errors': 0,
+                'skipped': 0,
+                'failed_count': 0,
+                'compared_topologies': [],
+                'skipped_topologies': ['hcp', 'classic', 'osd-gcp'],
+                'compared_display_names': [],
+                'skipped_display_names': ['HCP hosted (data plane)', 'Classic', 'OSD GCP'],
+                'failed_topologies': [],
+                'alert_monitoring_pass': 0,
+                'alert_monitoring_fail': 0,
+                'alert_monitoring_skip': 0,
+            },
+            'topologies': [],
+            'error_message': err_msg,
+            'note': err_msg,
+        }
 
     # Generate combined reports
     timestamp_suffix = f"_{datetime.now().strftime('%Y%m%d_%H%M%S')}"

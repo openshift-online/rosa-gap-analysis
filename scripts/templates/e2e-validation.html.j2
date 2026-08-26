@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ type }} Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; }
+        h1 { color: #333; border-bottom: 3px solid #0066cc; padding-bottom: 10px; }
+        h2 { color: #444; margin-top: 30px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
+        h3 { color: #555; margin-top: 20px; }
+        .metadata { background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #0066cc; color: white; font-weight: 600; }
+        code { background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+        .skip { background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .fail { background-color: #f8d7da; border-left: 4px solid #721c24; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .pass { background-color: #d4edda; border-left: 4px solid #155724; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .note { background-color: #f8f9fa; padding: 12px; border-radius: 5px; color: #555; font-size: 0.9em; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ type }} Report</h1>
+        <div class="metadata">
+            <p><strong>Generated:</strong> {{ timestamp }}</p>
+            <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code> (not consumed; target-only check)</p>
+            <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
+            <p><strong>Source:</strong> <code>junit-rosa-e2e.xml</code> from Prow GCS (<code>as: rosa-e2e-test</code>)</p>
+            <p><strong>Result:</strong> {{ validation_result }}</p>
+        </div>
+        <p class="note">{{ note }}</p>
+        {% include '_topology_coverage.html.j2' %}
+
+        {% if validation_result == 'FAIL' %}
+        <div class="fail"><strong>Failed:</strong> target e2e and/or alert monitoring reported failures.</div>
+        {% elif validation_result == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> no target e2e JUnit was available for the requested topologies.</div>
+        {% else %}
+        <div class="pass"><strong>Passed:</strong> target e2e JUnit had no failing tests. Missing alert-monitoring tests are SKIP, not FAIL.</div>
+        {% endif %}
+
+        <h2>Summary</h2>
+        <table style="width: 70%;">
+            <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+            <tbody>
+                <tr><td>Tests</td><td style="text-align: center;">{{ summary.tests }}</td></tr>
+                <tr><td>Failures</td><td style="text-align: center;">{{ summary.failures }}</td></tr>
+                <tr><td>Errors</td><td style="text-align: center;">{{ summary.errors }}</td></tr>
+                <tr><td>Skipped tests</td><td style="text-align: center;">{{ summary.skipped }}</td></tr>
+                <tr><td>Alert monitoring PASS</td><td style="text-align: center;">{{ summary.alert_monitoring_pass }}</td></tr>
+                <tr><td>Alert monitoring FAIL</td><td style="text-align: center;">{{ summary.alert_monitoring_fail }}</td></tr>
+                <tr><td>Alert monitoring SKIP</td><td style="text-align: center;">{{ summary.alert_monitoring_skip }}</td></tr>
+            </tbody>
+        </table>
+
+        {% for topo in topologies %}
+        <h2>{{ topo.display_name or (topo.topology | topology_label) }}</h2>
+        {% if topo.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.skip_reason }}</div>
+        {% else %}
+        <p>
+            Status: <strong>{{ topo.status }}</strong>
+            | tests {{ topo.tests }} / failures {{ topo.failures }} / skipped {{ topo.skipped }}
+            {% if topo.source.gcs_url %}
+            | <a href="{{ topo.source.gcs_url }}">JUnit</a>
+            {% endif %}
+            {% if topo.source.job_name %}
+            | job <code>{{ topo.source.job_name }}</code> build <code>{{ topo.source.build_id }}</code>
+            {% endif %}
+        </p>
+        <h3>Alert monitoring</h3>
+        {% if topo.alert_monitoring.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.alert_monitoring.skip_reason }}</div>
+        {% elif topo.alert_monitoring.status == 'FAIL' %}
+        <div class="fail"><strong>Failed:</strong> {{ topo.alert_monitoring.test_name }}</div>
+        {% else %}
+        <div class="pass"><strong>Passed:</strong> {{ topo.alert_monitoring.test_name }}</div>
+        {% endif %}
+        {% if topo.failed_cases %}
+        <h3>Failed tests</h3>
+        <table>
+            <thead><tr><th>Test</th><th>Message</th></tr></thead>
+            <tbody>
+            {% for case in topo.failed_cases %}
+                <tr><td><code>{{ case.name }}</code></td><td>{{ case.message }}</td></tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+
+        <div class="footer">Generated by rosa-gap-analysis Check #12</div>
+    </div>
+</body>
+</html>

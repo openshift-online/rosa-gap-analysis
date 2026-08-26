@@ -1,0 +1,53 @@
+{% if topologies %}
+<h3>Topology coverage</h3>
+<table>
+    <thead>
+        <tr>
+            <th>Topology</th>
+            <th>Status</th>
+            <th>Detail</th>
+        </tr>
+    </thead>
+    <tbody>
+    {% for topo in topologies %}
+        <tr>
+            <td>{{ topo.display_name or (topo.topology | topology_label) }}</td>
+            <td>{{ topo.status }}</td>
+            <td>
+                {% if topo.status == 'SKIP' %}
+                    {{ topo.skip_reason }}
+                {% elif topo.source %}
+                    tests {{ topo.tests or 0 }} / failures {{ topo.failures or 0 }} / skipped {{ topo.skipped or 0 }}
+                    {% if topo.alert_monitoring %}
+                    | alert monitoring {{ topo.alert_monitoring.status }}
+                    {% endif %}
+                    {% if topo.source.gcs_url %}
+                    | <a href="{{ topo.source.gcs_url }}">JUnit</a>
+                    {% endif %}
+                    {% if topo.source.job_name and topo.source.job_name != 'local' %}
+                    | <code>{{ topo.source.job_name }}</code>
+                    {% if topo.source.build_id %}build <code>{{ topo.source.build_id }}</code>{% endif %}
+                    {% endif %}
+                {% else %}
+                    {% if topo.baseline %}
+                    {{ topo.baseline.cluster_role or topo.baseline_topology or topo.topology }}
+                    <code>{{ topo.baseline.cluster_version or topo.baseline.openshift_version or '—' }}</code>
+                    {% if topo.baseline.gcs_url %}(<a href="{{ topo.baseline.gcs_url }}">baseline</a>){% endif %}
+                    {% if topo.baseline.job_name and topo.baseline.job_name != 'local' %}
+                    <code>{{ topo.baseline.job_name }}</code>
+                    {% endif %}
+                    →
+                    {{ topo.target.cluster_role or topo.target_topology or topo.topology }}
+                    <code>{{ topo.target.cluster_version or topo.target.openshift_version or '—' }}</code>
+                    {% if topo.target.gcs_url %}(<a href="{{ topo.target.gcs_url }}">target</a>){% endif %}
+                    {% if topo.target.job_name and topo.target.job_name != 'local' %}
+                    <code>{{ topo.target.job_name }}</code>
+                    {% endif %}
+                    {% endif %}
+                {% endif %}
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endif %}

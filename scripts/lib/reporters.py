@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Dict, Any
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from prow_artifacts import topology_display_name
 
 # Get templates directory
 TEMPLATE_DIR = Path(__file__).parent.parent / 'templates'
@@ -18,6 +19,7 @@ jinja_env = Environment(
     trim_blocks=True,
     lstrip_blocks=True
 )
+jinja_env.filters['topology_label'] = topology_display_name
 
 
 def generate_json_report(data: Dict[str, Any], output_file: str = None) -> str:
@@ -37,7 +39,7 @@ def generate_status_report(check_number: int, check_name: str, status: str,
     Generate a structured status file for gap-all.sh to consume.
 
     Args:
-        check_number: Numeric check identifier (1-8)
+        check_number: Numeric check identifier (1-12)
         check_name: Human-readable check name
         status: PASS, FAIL, WARNING, ERROR, SKIP
         details: Dictionary containing check-specific details
@@ -76,6 +78,14 @@ def generate_html_report(data: Dict[str, Any], output_file: str = None) -> str:
         template = jinja_env.get_template('versions-channels.html.j2')
     elif 'GA Readiness' in report_type or 'GA Validation' in report_type:
         template = jinja_env.get_template('ga-validation.html.j2')
+    elif report_type == "Target E2E Validation and alert monitoring" or "E2E Validation" in report_type:
+        template = jinja_env.get_template('e2e-validation.html.j2')
+    elif report_type == "Critical Alerts Diff Validation" or "Critical Alerts" in report_type:
+        template = jinja_env.get_template('critical-alerts.html.j2')
+    elif report_type == "API Resources and CRD Diff Validation" or "API Resources and CRD" in report_type:
+        template = jinja_env.get_template('api-resources.html.j2')
+    elif report_type == "Cluster Install and Delete Validation" or "Cluster Install" in report_type:
+        template = jinja_env.get_template('cluster-install.html.j2')
     elif 'OCM Version Gate' in report_type:
         template = jinja_env.get_template('ocm-version-gate.html.j2')
     elif 'Full Gap Analysis' in report_type or 'Aggregated Gap Analysis' in report_type:

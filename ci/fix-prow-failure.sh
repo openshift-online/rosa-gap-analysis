@@ -24,6 +24,8 @@ WORK_DIR="${GAP_WORK_DIR:-}"  # Use env var or require --work-dir
 REPORT_FILE=""
 AUTO_PR=false
 DRY_RUN=false
+GENERATE_ONLY=false
+SKIP_IF_PR_EXISTS=false
 SKIP_VALIDATION=false
 CLEANUP_WORK_DIR=false  # Set to true if temp dir should be cleaned up
 
@@ -89,6 +91,8 @@ GENERATION:
 
 PR CREATION:
     --create-pr           Create PR after validation succeeds
+    --generate-only       Generate files only; do not create a GitHub PR (no GH_TOKEN required)
+    --skip-if-pr-exists   If an open MCC PR already exists for this OCP minor, skip PR creation
     --test-mode           Create PR to test repository (TEST_REPO)
     --test-repo REPO      Test repository (owner/repo, for --test-mode)
     --target-repo REPO    Target repository (owner/repo, for production)
@@ -119,7 +123,9 @@ CONFIGURATION:
       export TEST_REPO="your-user/test-repo"
       # OR: --test-repo "your-user/test-repo"
 
-GITHUB AUTHENTICATION (REQUIRED):
+GITHUB AUTHENTICATION (required for --create-pr only):
+    Not required for --generate-only or --dry-run.
+
     Set GitHub Personal Access Token (PAT) as environment variable before running:
       export GH_TOKEN="ghp_yourPersonalAccessTokenHere"
 
@@ -127,7 +133,6 @@ GITHUB AUTHENTICATION (REQUIRED):
       export GITHUB_TOKEN="ghp_yourPersonalAccessTokenHere"
 
     PAT Requirements:
-      - REQUIRED: Must be set before running the script
       - Scopes: repo, read:org
       - Must belong to rosa-gap-analysis-bot (or custom GITHUB_USERNAME)
       - User must have write access to FORK_REPO
@@ -161,8 +166,8 @@ EXAMPLES:
       --test-repo another-user/test-repo
 
 PREREQUISITES:
-    - GH_TOKEN or GITHUB_TOKEN environment variable set (REQUIRED)
-    - gap-analysis failure report exists (run analyze-prow-failure.sh first)
+    - GH_TOKEN or GITHUB_TOKEN (required for --create-pr only; not for --generate-only or --dry-run)
+    - gap-analysis failure report exists (run analyze-prow-failure.sh first, or pass --report)
     - python3, PyYAML, jq, yq installed
     - For PR creation: gh CLI installed, fork repository exists
     - Target repository should have a Makefile (for generating additional files)
@@ -179,6 +184,11 @@ EOF
 
 # Validate environment prerequisites
 validate_environment() {
+    # Token is only required when actually opening a GitHub PR.
+    if [ "${AUTO_PR}" != true ] || [ "${DRY_RUN}" = true ]; then
+        return 0
+    fi
+
     # Check for GH_TOKEN or GITHUB_TOKEN early
     local token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
     if [ -z "${token}" ]; then
@@ -224,6 +234,15 @@ parse_args() {
                 ;;
             --create-pr)
                 AUTO_PR=true
+                shift
+                ;;
+            --generate-only)
+                GENERATE_ONLY=true
+                AUTO_PR=false
+                shift
+                ;;
+            --skip-if-pr-exists)
+                SKIP_IF_PR_EXISTS=true
                 shift
                 ;;
             --test-mode)
@@ -608,30 +627,30 @@ generate_pr_body() {
 
     # Generate failure summary from JSON report
     if [ -f "${REPORT_FILE}" ]; then
-        # Check AWS STS failures
-        local aws_missing=$(jq -r '.aws_sts.validation.check1.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
+        # Combined report paths: validation_details.check_* (not .validation.check1)
+        local aws_missing=$(jq -r '.aws_sts.validation_details.check_1_resources.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
         if [ "${aws_missing}" = "FAIL" ]; then
             echo "- **CHECK #1 (AWS STS):** Target directory resources/sts/${version}/ not found or empty" >> "${failure_summary_file}"
         fi
 
-        local aws_ack_missing=$(jq -r '.aws_sts.validation.check2.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
+        local aws_ack_missing=$(jq -r '.aws_sts.validation_details.check_2_admin_ack.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
         if [ "${aws_ack_missing}" = "FAIL" ]; then
             echo "- **CHECK #2 (AWS STS Acks):** Acknowledgment files missing in deploy/osd-cluster-acks/sts/${version}/" >> "${failure_summary_file}"
         fi
 
         # Check GCP WIF failures
-        local gcp_missing=$(jq -r '.gcp_wif.validation.check3.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
+        local gcp_missing=$(jq -r '.gcp_wif.validation_details.check_1_resources.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
         if [ "${gcp_missing}" = "FAIL" ]; then
             echo "- **CHECK #3 (GCP WIF):** vanilla.yaml not found in resources/wif/${version}/" >> "${failure_summary_file}"
         fi
 
-        local gcp_ack_missing=$(jq -r '.gcp_wif.validation.check4.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
+        local gcp_ack_missing=$(jq -r '.gcp_wif.validation_details.check_2_admin_ack.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
         if [ "${gcp_ack_missing}" = "FAIL" ]; then
             echo "- **CHECK #4 (GCP WIF Acks):** Acknowledgment files missing in deploy/osd-cluster-acks/wif/${version}/" >> "${failure_summary_file}"
         fi
 
         # Check OCP gate ack failures
-        local ocp_ack_missing=$(jq -r '.ocp_gate_ack.validation.check5.status // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
+        local ocp_ack_missing=$(jq -r '.ocp_gate_ack.validation_result // "UNKNOWN"' "${REPORT_FILE}" 2>/dev/null)
         if [ "${ocp_ack_missing}" = "FAIL" ]; then
             echo "- **CHECK #5 (OCP Gate Acks):** Acknowledgment file missing in deploy/osd-cluster-acks/ocp/${version}/" >> "${failure_summary_file}"
         fi
@@ -741,6 +760,27 @@ generate_pr_body() {
     }' "${template_file}"
 }
 
+# Find an open MCC PR for this OCP minor (any author).
+# Prints JSON {number,url,title,headRefName} or empty.
+find_existing_open_mcc_gap_pr() {
+    local version="$1"
+    local repo="${2:-openshift/managed-cluster-config}"
+    local branch_name="ocp-${version}-gap-analysis-update"
+    local title_fragment="Add OCP ${version} Gap Analysis"
+    local prs
+
+    if ! command -v gh &> /dev/null; then
+        return 1
+    fi
+
+    prs=$(gh pr list --repo "${repo}" --state open --limit 100 \
+        --json number,url,title,headRefName,author 2>/dev/null) || return 1
+
+    echo "${prs}" | jq -c --arg branch "${branch_name}" --arg title "${title_fragment}" '
+        [.[] | select(.headRefName == $branch or (.title | contains($title)))][0] // empty
+    '
+}
+
 # Create PR
 create_pr() {
     log_info "Creating pull request..."
@@ -809,17 +849,37 @@ create_pr() {
     baseline_version=$(jq -r '.baseline' "${REPORT_FILE}" 2>/dev/null || echo "unknown")
     target_version=$(jq -r '.target' "${REPORT_FILE}" 2>/dev/null || echo "${version}")
 
+    local branch_name="ocp-${version}-gap-analysis-update"
+
+    if [ "${SKIP_IF_PR_EXISTS}" = true ]; then
+        local existing_any=""
+        if ! existing_any=$(find_existing_open_mcc_gap_pr "${version}" "${actual_target}"); then
+            log_error "Could not search for existing open MCC PRs (gh failed)."
+            exit 1
+        fi
+        if [ -n "${existing_any}" ]; then
+            local existing_url existing_number
+            existing_url=$(echo "${existing_any}" | jq -r '.url')
+            existing_number=$(echo "${existing_any}" | jq -r '.number')
+            log_warn "Open PR already exists for OCP ${version}: ${existing_url} (#${existing_number})"
+            log_info "Skipping PR creation (--skip-if-pr-exists). Branch: ${branch_name}"
+            echo "${existing_url}" > "${WORK_DIR}/pr-url.txt"
+            return 0
+        fi
+        log_info "No open MCC PR for OCP ${version} — continuing"
+    fi
+
     # Extract Prow job ID from failure-summary.md or environment
     local prow_job_id="${PROW_JOB_ID}"
     if [ -z "${prow_job_id}" ] && [ -f "${WORK_DIR}/failure-summary.md" ]; then
         prow_job_id=$(grep "Job ID:" "${WORK_DIR}/failure-summary.md" 2>/dev/null | grep -oE '[0-9]{10,}' | head -1 || echo "")
     fi
 
-    # Extract job name from prowjob.json if available, otherwise use default
-    local prow_job_name="periodic-ci-openshift-online-rosa-gap-analysis-main-nightly"
+    # Extract job name from prowjob.json if available
+    local prow_job_name=""
     local prowjob_json="${WORK_DIR}/prowjob.json"
     if [ -f "${prowjob_json}" ]; then
-        prow_job_name=$(jq -r '.spec.job' "${prowjob_json}" 2>/dev/null || echo "${prow_job_name}")
+        prow_job_name=$(jq -r '.spec.job // empty' "${prowjob_json}" 2>/dev/null || echo "")
     fi
 
     # Get exact HTML report filename from work directory
@@ -831,7 +891,7 @@ create_pr() {
     # Construct Prow job URL and HTML report URL
     local prow_job_url="N/A"
     local html_report_url="N/A"
-    if [ -n "${prow_job_id}" ]; then
+    if [ -n "${prow_job_id}" ] && [ -n "${prow_job_name}" ]; then
         prow_job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/logs/${prow_job_name}/${prow_job_id}"
         if [ -n "${html_report_filename}" ]; then
             html_report_url="https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/${prow_job_name}/${prow_job_id}/artifacts/test/artifacts/rosa-gap-analysis-reports/${html_report_filename}"
@@ -853,7 +913,6 @@ create_pr() {
     trap "cd '${PROJECT_ROOT}' 2>/dev/null; rm -rf '${work_dir}'" EXIT
 
     local source_dir="${WORK_DIR}/managed-cluster-config"
-    local branch_name="ocp-${version}-gap-analysis-update"
 
     log_info "Using work directory: ${work_dir}"
 
@@ -1271,6 +1330,10 @@ main() {
     load_config
     parse_args "$@"
 
+    if [ "${GENERATE_ONLY}" = true ]; then
+        AUTO_PR=false
+    fi
+
     # Validate environment prerequisites early
     validate_environment
 
@@ -1326,8 +1389,13 @@ main() {
     else
         log_info ""
         log_info "Files generated and validated successfully!"
-        log_info "To create PR, run:"
-        log_info "  $(basename "$0") --create-pr"
+        log_info "Generated files: ${WORK_DIR}/managed-cluster-config/"
+        if [ "${GENERATE_ONLY}" = true ]; then
+            log_info "Generate-only mode: no PR created."
+        else
+            log_info "To create PR, run:"
+            log_info "  $(basename "$0") --work-dir \"${WORK_DIR}\" --create-pr"
+        fi
     fi
 
     log_info ""

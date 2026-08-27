@@ -215,11 +215,18 @@ from reporters import generate_html_report, generate_json_report
 - Reports saved to `${ARTIFACT_DIR}` if specified via `REPORT_DIR` env var
 
 **Automated fix (ci/prow-autofix.sh):**
-- One-step: check job status → if failed: analyze → generate fixes → create PR
+- One-step: discover matching periodics (`…-periodics-nightly-*`) → if failed: analyze → generate fixes → create PR
+- `--generate-only` writes MCC files without opening a GitHub PR (chai-bot uses this instead of `--create-pr`)
+- `--skip-if-pr-exists` skips when an open MCC PR already exists for that OCP minor
 - Auto-creates temp directory, auto-cleanup after PR creation
-- Requires only `GH_TOKEN` environment variable
-- Options: `--test-mode`, `--dry-run`, `--job-id`, `--verbose`
-- Recommended for CI/CD and automation workflows
+- Requires `GH_TOKEN` unless `--generate-only` or `--dry-run`
+- Options: `--test-mode`, `--dry-run`, `--generate-only`, `--skip-if-pr-exists`, `--job-name`, `--job-id`, `--verbose`
+
+**Chai-bot MCC autofix (scheduled, not a Prow post-step):**
+- Instructions: `.chai-bot/rosa_gap_mcc_autofix.md` (included from ship-help-bot)
+- After daily periodics, chai-bot opens **one MCC PR per failing OCP minor** for CHECK #1–#5
+- Same scripts as the laptop path: `analyze-prow-failure.sh` (gcloud GCS download) then `fix-prow-failure.sh --generate-only`. Chai-bot opens the GitHub PR (`priv_scm_create_change_request`) instead of `--create-pr`
+- Does not open a second PR if one already exists for that OCP minor (branch `ocp-X.Y-gap-analysis-update` **or** title containing `Add OCP {minor} Gap Analysis`)
 
 **Configuration (ci/pr-defaults.sh):**
 - Standardized defaults: `TARGET_REPO`, `FORK_REPO`, `LABELS`, `REVIEWERS`, `GITHUB_USERNAME`, `GIT_USER_NAME`, `GIT_USER_EMAIL`

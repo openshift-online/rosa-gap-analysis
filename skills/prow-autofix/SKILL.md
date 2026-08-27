@@ -103,7 +103,7 @@ export GH_TOKEN="<your-token>"
 ======================================================================
 
 [INFO] STEP 1/3: Checking job status...
-[INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly...
+[INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22...
 [INFO] Most recent job status: failure (ID: 2041035894848229376)
 [INFO] Most recent job failed. Proceeding with analysis...
 
@@ -146,7 +146,7 @@ PR URL: https://github.com/openshift/managed-cluster-config/pull/12345
 **Graceful exit (no failures):**
 ```
 [INFO] STEP 1/3: Checking job status...
-[INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly...
+[INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22...
 [INFO] Most recent job status: success (ID: 2046254941009350656)
 
 ======================================================================
@@ -170,19 +170,21 @@ All options from the underlying script are supported:
 ./ci/prow-autofix.sh [OPTIONS]
 
 OPTIONS:
-  -j, --job-name NAME    Job name to analyze (default: periodic-ci-...-nightly)
+  -j, --job-name NAME    Periodic to analyze (omit to process all matching …-periodics-nightly-*)
   -i, --job-id ID        Analyze specific job by ID
   -t, --test-mode        Create PR to TEST_REPO instead of production
   -d, --dry-run          Preview changes without creating PR
+  --generate-only        Generate MCC files only; do not create a GitHub PR
+  --skip-if-pr-exists    Skip if an open MCC PR already exists for that OCP minor
   -v, --verbose          Enable verbose output
-  -h, --help            Display help
+  -h, --help             Display help
 ```
 
 ## Prerequisites
 
 **Required before using this skill:**
 
-1. **GH_TOKEN set:**
+1. **GH_TOKEN set** (required unless `--generate-only` or `--dry-run`):
    ```bash
    export GH_TOKEN="ghp_yourToken"  # Must belong to rosa-gap-analysis-bot
    ```
@@ -272,13 +274,12 @@ export FORK_REPO="different-user/managed-cluster-config"
    - Use --job-id to analyze specific older failed jobs (skips status check)
 
 2. **GH_TOKEN not set:**
-   - Fails early with clear error message
-   - Prompts user to set token
+   - Fails early with a clear error unless `--generate-only` or `--dry-run`
+   - Prompts user to set token when `--create-pr` would run
 
 3. **PR already exists:**
-   - Checks for existing branch
-   - Returns existing PR URL
-   - Does not create duplicate
+   - With `--skip-if-pr-exists`: leave the open PR alone and print its URL
+   - Without that flag: update the existing PR for the same `ocp-{minor}-gap-analysis-update` branch
 
 4. **Validation failure:**
    - Shows which file failed validation
@@ -289,5 +290,5 @@ export FORK_REPO="different-user/managed-cluster-config"
 
 - **Temporary directory:** Automatically created and cleaned up after success
 - **Failure preservation:** Work directory preserved on error for debugging
-- **No duplicate PRs:** Checks for existing branch before creating new PR
+- **No duplicate PRs:** `--skip-if-pr-exists` skips when an open MCC PR for that OCP minor already exists
 - **Graceful degradation:** Handles missing artifacts, successful jobs gracefully

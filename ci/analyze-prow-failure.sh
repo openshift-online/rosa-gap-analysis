@@ -17,7 +17,6 @@ source "${SCRIPT_DIR}/lib/prow-api.sh"
 source "${SCRIPT_DIR}/lib/failure-parser.sh"
 
 # Configuration
-readonly DEFAULT_JOB_NAME="periodic-ci-openshift-online-rosa-gap-analysis-main-nightly"
 readonly DEFAULT_ARTIFACTS_DIR="${SCRIPT_DIR}/artifacts"  # Fallback only
 
 # Colors
@@ -64,28 +63,34 @@ BEHAVIOR:
   - Use --job-id to analyze a specific older job manually
 
 OPTIONS:
-    -j, --job-name NAME    Job name to analyze (default: ${DEFAULT_JOB_NAME})
+    -j, --job-name NAME    Periodic job name (discovered from openshift/release if omitted)
     -i, --job-id ID        Specific job ID to analyze (for older failed jobs)
     -w, --work-dir DIR     Work directory for artifacts (default: .tmp/gap-work/analysis-XXXXXX)
     -k, --keep-work-dir    Keep temporary work directory after completion
     --web-auth            Authenticate via web browser if not logged in
     -h, --help            Display this help message
 
+Job discovery (when --job-name is omitted):
+    Periodics matching
+      ^periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-[0-9]+-[0-9]+$
+    If exactly one latest run failed, that job is analyzed.
+    If several failed, pass --job-name (or use prow-autofix.sh to loop them).
+
 EXAMPLES:
-    # Analyze most recent job - uses temp directory
+    # Analyze the single latest failure across matching periodics
     $(basename "$0")
 
     # Analyze and keep work directory for later review
     $(basename "$0") --keep-work-dir
 
-    # Analyze specific failed job by ID
+    # Analyze specific failed job by ID (job name is resolved if omitted)
     $(basename "$0") --job-id 2043621071365607424
 
     # Use persistent directory for review
     $(basename "$0") --work-dir /home/user/prow-analysis
 
-    # Analyze different job
-    $(basename "$0") -j periodic-ci-openshift-online-rosa-gap-analysis-main-candidate
+    # Analyze a specific periodic
+    $(basename "$0") -j periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22
 
     # Authenticate via web browser if needed
     $(basename "$0") --web-auth
@@ -283,9 +288,72 @@ analyze_gap_report() {
     echo "======================================================================"
 }
 
+# Resolve job_name when the caller omitted --job-name.
+# --job-id: search matching periodics for that build.
+# otherwise: if exactly one latest completed run failed, use that job.
+resolve_job_name() {
+    local job_name="$1"
+    local specific_job_id="$2"
+
+    if [ -n "${job_name}" ]; then
+        echo "${job_name}"
+        return 0
+    fi
+
+    if [ -n "${specific_job_id}" ]; then
+        log_info "Resolving job name for build ID ${specific_job_id}..." >&2
+        resolve_job_name_for_id "${specific_job_id}"
+        return $?
+    fi
+
+    local jobs job executions job_status job_id
+    local -a failed_jobs=()
+    local -a failed_ids=()
+    local lookup_failures=0
+
+    jobs=$(list_gap_analysis_periodic_jobs) || return 1
+    log_info "Discovered gap-analysis periodics:" >&2
+    while IFS= read -r job; do
+        [ -z "${job}" ] && continue
+        if ! executions=$(get_job_executions "${job}" 1); then
+            log_error "Failed to fetch job history for ${job}"
+            lookup_failures=$((lookup_failures + 1))
+            continue
+        fi
+        job_status=$(echo "${executions}" | jq -r '.items[0].job_status // empty')
+        job_id=$(echo "${executions}" | jq -r '.items[0].id // empty')
+        log_info "  ${job}: ${job_status:-no-data} (${job_id:-n/a})" >&2
+        if [ "${job_status}" = "failure" ] || [ "${job_status}" = "error" ]; then
+            failed_jobs+=("${job}")
+            failed_ids+=("${job_id}")
+        fi
+    done <<< "${jobs}"
+
+    if [ "${lookup_failures}" -gt 0 ]; then
+        log_error "Failed to query job history for ${lookup_failures} periodic(s)."
+        return 1
+    fi
+
+    if [ ${#failed_jobs[@]} -eq 0 ]; then
+        log_success "No latest-run failures among matching periodics." >&2
+        return 2
+    fi
+
+    if [ ${#failed_jobs[@]} -gt 1 ]; then
+        log_error "Multiple periodics failed. Pass --job-name, or use ./ci/prow-autofix.sh to process all of them."
+        local i
+        for i in "${!failed_jobs[@]}"; do
+            log_error "  ${failed_jobs[$i]} (ID: ${failed_ids[$i]})"
+        done
+        return 1
+    fi
+
+    echo "${failed_jobs[0]}"
+}
+
 # Main function
 main() {
-    local job_name="${DEFAULT_JOB_NAME}"
+    local job_name=""
     local specific_job_id=""
     local work_dir=""
     local keep_work_dir=false
@@ -354,6 +422,17 @@ main() {
     # Check prerequisites
     check_prerequisites
     validate_auth "$web_auth"
+
+    local resolved
+    local resolve_rc=0
+    resolved=$(resolve_job_name "${job_name}" "${specific_job_id}") || resolve_rc=$?
+    if [ "${resolve_rc}" -eq 2 ]; then
+        exit 0
+    elif [ "${resolve_rc}" -ne 0 ]; then
+        exit 1
+    fi
+    job_name="${resolved}"
+    log_info "Using job: ${job_name}"
 
     local job_id=""
     local artifacts_downloaded=false

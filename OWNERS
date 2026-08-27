@@ -6,6 +6,11 @@ approvers:
 - dustman9000
 - tiwillia
 - tkong-redhat
+- charlesgong
+- Tafhim
+- TheUndeadKing
+- chamalabey
+- charlesgong
 
 reviewers:
 - ravitri
@@ -17,3 +22,6 @@ reviewers:
 - tkong-redhat
 - charlesgong
 - Tafhim
+- TheUndeadKing
+- chamalabey
+- charlesgong

@@ -11,8 +11,11 @@ set -euo pipefail
 
 # Configuration
 readonly GANGWAY_URL="https://gangway-ci.apps.ci.l2s4.p1.openshiftapps.com/v1"
-readonly DEFAULT_JOB_NAME="periodic-ci-openshift-online-rosa-gap-analysis-main-nightly"
 readonly JOB_EXECUTION_TYPE="1"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=ci/lib/prow-api.sh
+source "${SCRIPT_DIR}/lib/prow-api.sh"
 
 # Colors for output
 readonly RED='\033[0;31m'
@@ -28,20 +31,25 @@ Usage: $(basename "$0") [OPTIONS]
 Trigger and monitor OpenShift CI Prow jobs via Gangway API.
 
 OPTIONS:
-    -j, --job-name NAME    Job name to trigger (default: ${DEFAULT_JOB_NAME})
+    -j, --job-name NAME    Periodic job name (required)
     -w, --wait            Wait and poll for job completion
     --web-auth            Authenticate via web browser if not logged in
     -h, --help            Display this help message
 
+Job names match:
+  periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-{major}-{minor}
+
+Omit --job-name to list discovered periodics and exit.
+
 EXAMPLES:
-    # Trigger the default job
+    # List matching periodics
     $(basename "$0")
 
-    # Trigger a specific job
-    $(basename "$0") -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
+    # Trigger a specific periodic
+    $(basename "$0") -j periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22
 
     # Trigger and wait for completion
-    $(basename "$0") -w
+    $(basename "$0") -j periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22 -w
 
     # Authenticate via web browser if not logged in
     $(basename "$0") --web-auth
@@ -245,7 +253,7 @@ wait_for_job() {
 
 # Main function
 main() {
-    local job_name="${DEFAULT_JOB_NAME}"
+    local job_name=""
     local wait_for_completion=false
     local web_auth=false
 
@@ -275,6 +283,19 @@ main() {
                 ;;
         esac
     done
+
+    if [ -z "${job_name}" ]; then
+        if ! command -v curl &> /dev/null; then
+            log_error "curl is required to list periodics."
+            exit 1
+        fi
+        log_info "No --job-name given. Discovered gap-analysis periodics:"
+        local jobs
+        jobs=$(list_gap_analysis_periodic_jobs) || exit 1
+        echo "${jobs}"
+        log_error "Pass -j/--job-name with one of the jobs above."
+        exit 1
+    fi
 
     # Run prerequisite checks
     check_prerequisites

@@ -216,7 +216,12 @@ class GAReadinessValidator:
         """Check gap analysis Prow CI job status for the target version."""
         name = "CI Job Status"
         prow_url = "https://prow.ci.openshift.org"
-        job_name = "periodic-ci-openshift-online-rosa-gap-analysis-main-nightly"
+        major_minor = ".".join(self.version.split(".")[:2])
+        job_suffix = major_minor.replace(".", "-")
+        job_name = (
+            "periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-"
+            f"{job_suffix}"
+        )
 
         try:
             history_url = f"{prow_url}/job-history/gs/test-platform-results/logs/{job_name}"

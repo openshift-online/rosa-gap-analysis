@@ -77,8 +77,9 @@ export GH_TOKEN="ghp_yourToken"  # REQUIRED for step 2
 ### Test 1: Trigger Prow Job (Manual)
 
 ```bash
-# Trigger default nightly job and monitor
-./ci/trigger-prow-job.sh --wait
+# List matching periodics, then trigger one and monitor
+./ci/trigger-prow-job.sh
+./ci/trigger-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22 --wait
 ```
 
 **Expected:** Triggers job, polls status every 30s, displays final result.
@@ -91,13 +92,13 @@ export GH_TOKEN="ghp_yourToken"  # REQUIRED for step 2
 export GH_TOKEN="ghp_your_token"
 export TEST_REPO="your-user/test-managed-cluster-config"
 
-# One-step automated workflow
-./ci/prow-autofix.sh --test-mode
+# One-step automated workflow (all matching periodics, or pass --job-name)
+./ci/prow-autofix.sh --test-mode --skip-if-pr-exists
 ```
 
-**Expected:** Analyzes latest failure, generates fixes, validates files, creates PR, auto-cleans temp directory.
+**Expected:** Discovers matching periodics whose latest run failed. For each, generates fixes and either creates a PR or skips if an open MCC PR already exists for that OCP minor (`--skip-if-pr-exists`). A successful run may create zero, one, or several PRs. Auto-cleans temp directory after PR creation.
 
-**Validates:** Complete automation pipeline, standardized PR configuration.
+**Validates:** Complete automation pipeline, duplicate-PR skip, standardized PR configuration.
 
 ### Test 3: Automated Dry Run
 

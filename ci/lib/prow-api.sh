@@ -13,19 +13,82 @@ set -euo pipefail
 GANGWAY_URL="${GANGWAY_URL:-https://gangway-ci.apps.ci.l2s4.p1.openshiftapps.com/v1}"
 PROW_URL="${PROW_URL:-https://prow.ci.openshift.org}"
 GCS_BASE_URL="${GCS_BASE_URL:-https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs}"
-DEFAULT_JOB_NAME="${DEFAULT_JOB_NAME:-periodic-ci-openshift-online-rosa-gap-analysis-main-nightly}"
+
+# Live periodics are named:
+#   periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-{major}-{minor}
+# Discover them from openshift/release rather than a hardcoded job name.
+GAP_PERIODIC_JOB_PREFIX="${GAP_PERIODIC_JOB_PREFIX:-periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-}"
+GAP_PERIODIC_JOB_REGEX="${GAP_PERIODIC_JOB_REGEX:-^periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-[0-9]+-[0-9]+$}"
+OPENSHIFT_RELEASE_PERIODICS_JOBS_URL="${OPENSHIFT_RELEASE_PERIODICS_JOBS_URL:-https://raw.githubusercontent.com/openshift/release/master/ci-operator/jobs/openshift-online/rosa-gap-analysis/openshift-online-rosa-gap-analysis-main-periodics.yaml}"
+
+# List gap-analysis periodic job names matching GAP_PERIODIC_JOB_REGEX.
+# Source of truth: generated periodics YAML in openshift/release (not a local job list).
+list_gap_analysis_periodic_jobs() {
+    local yaml jobs
+    if ! yaml=$(curl -fsSL --max-time 30 "${OPENSHIFT_RELEASE_PERIODICS_JOBS_URL}"); then
+        echo "ERROR: Failed to fetch periodics job list from openshift/release" >&2
+        return 1
+    fi
+
+    jobs=$(echo "${yaml}" | grep -oE "${GAP_PERIODIC_JOB_PREFIX}[0-9]+-[0-9]+" | sort -u | grep -E "${GAP_PERIODIC_JOB_REGEX}" || true)
+    if [ -z "${jobs}" ]; then
+        echo "ERROR: No gap-analysis periodics matched ${GAP_PERIODIC_JOB_REGEX}" >&2
+        return 1
+    fi
+
+    echo "${jobs}"
+}
+
+# Convert OCP minor (e.g. 4.22) to the matching periodic job name.
+ocp_minor_to_periodic_job_name() {
+    local minor="$1"
+    local suffix="${minor//./-}"
+    echo "${GAP_PERIODIC_JOB_PREFIX}${suffix}"
+}
+
+# Resolve which discovered periodic owns a Prow build ID.
+resolve_job_name_for_id() {
+    local job_id="$1"
+    local job found
+
+    if [ -z "${job_id}" ]; then
+        echo "ERROR: job_id is required" >&2
+        return 1
+    fi
+
+    while IFS= read -r job; do
+        [ -z "${job}" ] && continue
+        found=$(get_job_execution "${job_id}" "${job}" 2>/dev/null | jq -r '.id // empty')
+        if [ "${found}" = "${job_id}" ]; then
+            echo "${job}"
+            return 0
+        fi
+    done < <(list_gap_analysis_periodic_jobs)
+
+    echo "ERROR: Could not resolve job name for build ID ${job_id}" >&2
+    return 1
+}
 
 # Get latest job executions for a given job name from job-history page
 # Args: $1 = job_name, $2 = limit (default: 10)
 # Returns: JSON array of job executions
 get_job_executions() {
-    local job_name="${1:-${DEFAULT_JOB_NAME}}"
+    local job_name="${1:-}"
     local limit="${2:-10}"
+
+    if [ -z "${job_name}" ]; then
+        echo "ERROR: job_name is required" >&2
+        echo '{"items":[]}'
+        return 1
+    fi
 
     # Fetch job-history page and extract allBuilds JavaScript array
     local all_builds
-    all_builds=$(curl -s "${PROW_URL}/job-history/gs/test-platform-results/logs/${job_name}" | \
-        sed -n 's/.*var allBuilds = \(\[.*\]\);.*/\1/p')
+    if ! all_builds=$(curl -fsS --max-time 30 "${PROW_URL}/job-history/gs/test-platform-results/logs/${job_name}" | \
+        sed -n 's/.*var allBuilds = \(\[.*\]\);.*/\1/p'); then
+        echo '{"items":[]}'
+        return 1
+    fi
 
     if [ -z "${all_builds}" ]; then
         echo '{"items":[]}'
@@ -42,7 +105,13 @@ get_job_executions() {
 # Returns: JSON object with job execution details
 get_job_execution() {
     local job_id="$1"
-    local job_name="${2:-${DEFAULT_JOB_NAME}}"
+    local job_name="${2:-}"
+
+    if [ -z "${job_name}" ]; then
+        echo "ERROR: job_name is required" >&2
+        echo '{"id":null,"job_status":null,"start_time":null,"completion_time":null,"duration":null}'
+        return 1
+    fi
 
     # Fetch job-history page and extract allBuilds JavaScript array
     local all_builds
@@ -72,7 +141,12 @@ get_job_execution() {
 # Args: $1 = job_name (optional)
 # Returns: Job ID of latest failed job
 find_latest_failed_job() {
-    local job_name="${1:-${DEFAULT_JOB_NAME}}"
+    local job_name="${1:-}"
+
+    if [ -z "${job_name}" ]; then
+        echo "ERROR: job_name is required" >&2
+        return 1
+    fi
     local limit="${2:-5}"
     local executions
 
@@ -176,8 +250,13 @@ find_gap_analysis_reports() {
 # Returns: JSON object with metadata
 get_job_metadata() {
     local job_id="$1"
-    local job_name="${2:-${DEFAULT_JOB_NAME}}"
+    local job_name="${2:-}"
     local job_details
+
+    if [ -z "${job_name}" ]; then
+        echo "ERROR: job_name is required" >&2
+        return 1
+    fi
 
     job_details=$(get_job_execution "${job_id}" "${job_name}")
 

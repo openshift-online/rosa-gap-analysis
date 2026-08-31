@@ -320,7 +320,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 ```
 
 **Options:**
-- `-j, --job-name NAME` - Specify the Prow job name to analyze (default: `periodic-ci-openshift-online-rosa-gap-analysis-main-nightly`)
+- `-j, --job-name NAME` - Periodic to analyze (omit to auto-discover matching `…-periodics-nightly-*` jobs; if several failed, pass `--job-name` or use `prow-autofix.sh`)
 - `-i, --job-id ID` - Analyze a specific older job by ID
 - `-h, --help` - Display help message
 
@@ -350,7 +350,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 # [INFO] Gap Analysis Failure Analyzer
 # ======================================================================
 # [INFO] Authenticated as: user@redhat.com
-# [INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly...
+# [INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22...
 # [INFO] Most recent job status: failure (ID: 2041035894848229376)
 # [INFO] Most recent job failed. Downloading artifacts for: 2041035894848229376
 # {
@@ -389,7 +389,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 ./ci/analyze-prow-failure.sh
 
 # Output:
-# [INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-nightly...
+# [INFO] Checking most recent job for: periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22...
 # [INFO] Most recent job status: success (ID: 2043621071365607424)
 # [SUCCESS] ✅ Most recent job is successful or pending
 # [INFO]
@@ -398,7 +398,7 @@ For manual analysis and review, use `analyze-prow-failure.sh`:
 # [INFO]
 # [INFO] All recent jobs are successful or pending. No analysis needed.
 # [INFO] To analyze a specific failed job, use: --job-id <JOB_ID>
-# [INFO] Find job IDs at: https://prow.ci.openshift.org/?job=periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
+# [INFO] Find job IDs at: https://prow.ci.openshift.org/?job=periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22
 ```
 
 **Example 3: Analyze specific job by ID**
@@ -490,7 +490,7 @@ The analyzer uses library modules organized under `ci/lib/`:
 **ci/lib/prow-api.sh** - Prow deck API integration:
 - Uses Prow deck API at `https://prow.ci.openshift.org/prowjobs.js` (publicly accessible, no auth required)
 - `get_job_executions()` - Get recent job executions (count parameter, default: 1)
-- `get_job_metadata(job_id, [job_name])` - Fetch job details (status, timestamps); job_name optional (defaults to DEFAULT_JOB_NAME)
+- `get_job_metadata(job_id, job_name)` - Fetch job details (status, timestamps); job_name is required
 - `download_job_directory_gcs()` - Download entire job directory using `gcloud storage cp -r`
 - `find_gap_analysis_reports()` - Find gap-analysis reports in downloaded artifacts directory
 
@@ -528,30 +528,25 @@ The `trigger-prow-job.sh` script allows you to manually trigger OpenShift CI Pro
 ```
 
 **Options:**
-- `-j, --job-name NAME` - Specify the Prow job name to trigger (default: `periodic-ci-openshift-online-rosa-gap-analysis-main-nightly`)
+- `-j, --job-name NAME` - Periodic job name to trigger (required; omit to list discovered periodics)
 - `-w, --wait` - Wait and poll for job completion with status updates
 - `-h, --help` - Display help message
 
 ### Examples
 
-**Trigger the default nightly job:**
+**List matching periodics:**
 ```bash
 ./ci/trigger-prow-job.sh
 ```
 
 **Trigger and wait for completion:**
 ```bash
-./ci/trigger-prow-job.sh -w
+./ci/trigger-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22 -w
 ```
 
 **Trigger a specific job:**
 ```bash
-./ci/trigger-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly
-```
-
-**Trigger a specific job and monitor until completion:**
-```bash
-./ci/trigger-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-nightly -w
+./ci/trigger-prow-job.sh -j periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-22
 ```
 
 ### Output
@@ -703,10 +698,12 @@ Fully automated pipeline:
 ```
 
 **Options:**
-- `-j, --job-name NAME` - Analyze specific job name
+- `-j, --job-name NAME` - Analyze a specific periodic (omit to process every matching `…-periodics-nightly-*` whose latest run failed)
 - `-i, --job-id ID` - Analyze specific job by ID
 - `-t, --test-mode` - Create PR to TEST_REPO (for testing)
 - `-d, --dry-run` - Preview without creating PR
+- `--generate-only` - Generate MCC files only; do not create a GitHub PR
+- `--skip-if-pr-exists` - Skip if an open MCC PR already exists for that OCP minor
 - `-v, --verbose` - Enable verbose output
 - `-h, --help` - Display help
 
@@ -758,6 +755,16 @@ Choose the right workflow for your needs:
 | **When to use** | Automated environments, trusted workflow | Need to review failures before PR, debugging |
 
 See also: [Analyzing CI Failures](#analyzing-ci-failures) and [Fixing Prow Failures and Creating PRs](#fixing-prow-failures-and-creating-prs)
+
+## Chai-bot MCC autofix
+
+Daily Prow periodics stay in this repo. After they finish, chai-bot (ship-help-bot persona `rosa_engineering_public`) runs `.chai-bot/rosa_gap_mcc_autofix.md` and opens **one MCC PR per failing OCP minor** for CHECK #1–#5 failures.
+
+- Job discovery is a regex (`…-periodics-nightly-{major}-{minor}`), not a local job list
+- Same scripts as the laptop path: `./ci/analyze-prow-failure.sh` then `./ci/fix-prow-failure.sh --generate-only` (never LLM-written IAM JSON)
+- Chai-bot opens the MCC PR via `priv_scm_create_change_request` instead of `--create-pr`
+- If an open PR already exists for `ocp-{minor}-gap-analysis-update`, chai-bot does **not** open another
+- Humans still `/lgtm` and `/approve` on `openshift/managed-cluster-config`
 
 ## Related Documentation
 

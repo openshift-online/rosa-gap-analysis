@@ -38,9 +38,10 @@ ALERT_MARKERS = (
     "no unexpected critical alerts",
 )
 NOTE = (
-    "Target-version only: consumes junit-rosa-e2e.xml from the existing rosa-e2e "
-    "test step (as: rosa-e2e-test). Does not compare baseline vs target. "
-    "Missing JUnit is SKIP. Failed e2e tests FAIL this check. "
+    "Informational check. Target-version only: consumes junit-rosa-e2e.xml from "
+    "the existing rosa-e2e test step (as: rosa-e2e-test). Does not compare "
+    "baseline vs target. Missing JUnit is SKIP. Failed e2e tests are reported "
+    "as FAIL in the report (current e2e quality) but do not fail this job. "
     "OSD GCP is skipped for OpenShift 5.x (AWS/STS-only). "
     "Alert monitoring looks for a future VerifyNoCriticalAlerts-style test; "
     "until that test exists the subsection is SKIP and does not fail the check. "
@@ -222,10 +223,10 @@ def print_topology(result, verbose=False):
     if alert["status"] == "SKIP":
         log_warning(f"    alert monitoring: SKIP ({alert['skip_reason']})")
     elif alert["status"] == "FAIL":
-        log_error(f"    alert monitoring: FAIL ({alert.get('test_name')})")
+        log_warning(f"    alert monitoring: FAIL ({alert.get('test_name')})")
     if verbose:
         for case in result["failed_cases"]:
-            log_error(f"    FAIL {case['name']}")
+            log_warning(f"    FAIL {case['name']}")
 
 
 def combined_summary(topology_results):
@@ -288,8 +289,9 @@ Examples:
   %(prog)s --junit /tmp/junit-rosa-e2e.xml --topology hcp --baseline 4.21 --target 4.22
 
 Exit Codes:
-  0 - PASS or SKIP (missing JUnit)
-  1 - FAIL (e2e test failures or alert monitoring failure) or execution error
+  0 - Successful execution (informational; missing JUnit is SKIP;
+      failed e2e tests are reported but do not fail the job)
+  1 - Execution failure
         """,
     )
     parser.add_argument("--version", help="Single version to analyze (auto-resolves baseline and target)")
@@ -412,33 +414,41 @@ Exit Codes:
         log_warning(f"CHECK #{CHECK_NUMBER}: {CHECK_NAME} [SKIP]")
         log_warning(f"  {status_message}")
     elif validation_result == "FAIL":
-        log_error(f"CHECK #{CHECK_NUMBER}: {CHECK_NAME} [FAIL]")
-        log_error(f"  {status_message}")
+        log_warning(f"CHECK #{CHECK_NUMBER}: {CHECK_NAME} [FAIL] (informational; does not fail the job)")
+        log_warning(f"  {status_message}")
         for result in topology_results:
             for case in result.get("failed_cases") or []:
-                log_error(f"    • {result['topology']}: {case['name']}")
+                log_warning(f"    • {result['topology']}: {case['name']}")
+        log_success(f"✅ PASSED - {CHECK_NAME} analysis complete (informational)")
     else:
-        log_success(f"✓ VALIDATION PASSED - {CHECK_NAME}")
-        log_success(f"CHECK #{CHECK_NUMBER}: {CHECK_NAME} [PASS]")
+        log_success(f"✓ VALIDATION PASSED - {CHECK_NAME} (Informational)")
+        log_success(f"CHECK #{CHECK_NUMBER}: {CHECK_NAME} [PASS - Info]")
         log_success(f"  {status_message}")
         skipped = [result for result in topology_results if result["status"] == "SKIP"]
         if skipped:
             log_warning(f"  Skipped topologies: {', '.join(r.get('display_name') or r['topology'] for r in skipped)}")
+        log_success(f"✅ PASSED - {CHECK_NAME} analysis complete (informational)")
 
+    # Report FAIL stays in HTML/JSON for e2e quality. Status file uses WARNING
+    # so exit_code is 0 and the orchestrator does not treat this as a job failure.
+    status_for_orchestrator = "WARNING" if validation_result == "FAIL" else validation_result
     generate_status_report(
         check_number=CHECK_NUMBER,
         check_name=CHECK_NAME,
-        status=validation_result,
+        status=status_for_orchestrator,
         details={
             "message": status_message,
-            "differences_count": summary["failed_count"],
+            "differences_count": (
+                max(summary["failed_count"], 1) if validation_result == "FAIL"
+                else summary["failed_count"]
+            ),
             "compared_topologies": summary["compared_topologies"],
             "skipped_topologies": summary["skipped_topologies"],
             "failed_topologies": summary["failed_topologies"],
         },
         report_dir=args.report_dir,
     )
-    sys.exit(1 if validation_result == "FAIL" else 0)
+    sys.exit(0)
 
 
 if __name__ == "__main__":

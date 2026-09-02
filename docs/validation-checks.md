@@ -19,7 +19,7 @@ All scripts use a consistent global check numbering system:
 | **9** | API Resources and CRD Diff Validation | Compares live ROSA API resources and CRDs from HCP, Classic, and OSD GCP cluster snapshots. Each topology is compared to itself. OSD GCP is skipped for OpenShift 5.x (AWS/STS-only). Identifies new/removed APIs and CRDs, version promotions, and deprecations that may affect managed services. Missing snapshots are SKIP, not FAIL. | Always PASS (exit code 0) |
 | **10** | Critical Alerts Diff Validation | Compares live PrometheusRule alerting rules from HCP, Classic, and OSD GCP cluster snapshots. Same topologies as Check #9. Identifies new critical alerts, modified queries/thresholds/severity, and recommends inherit vs silence vs review. Missing snapshots are SKIP. | Always PASS (exit code 0) |
 | **11** | Cluster Install and Delete Validation | Compares live ClusterOperator and node health from HCP, Classic, and OSD GCP cluster snapshots taken in the rosa-e2e **post** phase (before deprovision). Same topologies as Check #9. Identifies new/removed operators, newly degraded/unavailable operators, and NotReady nodes. Delete-duration metrics are not in the snapshot yet. Missing snapshots are SKIP. | Always PASS (exit code 0) |
-| **12** | Target E2E Validation and alert monitoring | Consumes target-version `junit-rosa-e2e.xml` from the existing rosa-e2e test step. Does not compare baseline vs target. Fetches HCP, Classic, and OSD GCP JUnit. OSD GCP is skipped for OpenShift 5.x. Missing JUnit is SKIP. Failed e2e tests FAIL. Alert monitoring looks for a future VerifyNoCriticalAlerts test; until it exists the subsection is SKIP and does not fail the check. | Exit code 1 on FAIL |
+| **12** | Target E2E Validation and alert monitoring | Consumes target-version `junit-rosa-e2e.xml` from the existing rosa-e2e test step. Does not compare baseline vs target. Fetches HCP, Classic, and OSD GCP JUnit. OSD GCP is skipped for OpenShift 5.x. Missing JUnit is SKIP. Failed e2e tests are reported as FAIL in the report and do not fail the job. Alert monitoring looks for a future VerifyNoCriticalAlerts test; until it exists the subsection is SKIP and does not fail the check. | Informational FAIL does not fail the job (exit 0); execution error exits 1 |
 
 
 ## Check Execution by Script
@@ -54,7 +54,7 @@ All scripts use a consistent global check numbering system:
 - **Check 11:** Cluster Install and Delete Validation (Info only; consumes live ClusterOperator/node snapshots)
 
 ### gap-e2e-validation.py
-- **Check 12:** Target E2E Validation and alert monitoring (standard; consumes target-version junit-rosa-e2e.xml)
+- **Check 12:** Target E2E Validation and alert monitoring (Info only; consumes target-version junit-rosa-e2e.xml)
 
 ### gap-all.sh (Combined)
 Runs all checks in order:
@@ -393,9 +393,9 @@ When no admin gates exist in cluster-version-operator, acknowledgment files use 
 - Does not use Check #10 `alerts.json` (those are PrometheusRule definitions, not firing state)
 
 **Pass criteria:**
-- PASS when parsed JUnit has no failing tests
+- Informational only — failed tests are reported as FAIL in the HTML/JSON report and do not fail the job (exit 0)
 - SKIP when JUnit is missing
-- FAIL when e2e tests fail, or the alert-monitoring test is present and failed
+- Report FAIL when e2e tests fail, or the alert-monitoring test is present and failed
 - Missing alert-monitoring test is SKIP for that subsection and does not fail the check
 - OSD GCP is skipped for OpenShift 5.x (AWS/STS-only)
 
@@ -471,17 +471,17 @@ python3 ./scripts/gap-aws-sts.py --baseline 4.23 --target 5.0
 
 ## Exit Codes
 
-### Individual Scripts (gap-aws-sts.py, gap-gcp-wif.py, gap-ocp-gate-ack.py, gap-versions-channels.py, gap-ocm-version-gate.py, gap-e2e-validation.py)
-- **Exit 0 (PASS):** All relevant checks passed OR dry-run mode (Check #12 also exits 0 on SKIP)
+### Individual Scripts (gap-aws-sts.py, gap-gcp-wif.py, gap-ocp-gate-ack.py, gap-versions-channels.py, gap-ocm-version-gate.py)
+- **Exit 0 (PASS):** All relevant checks passed OR dry-run mode
 - **Exit 1 (FAIL):** One or more checks failed OR execution error
 
-### Feature Gates Script (gap-feature-gates.py)
-- **Exit 0 (PASS):** Always (informational only) OR dry-run mode
+### Informational Scripts (gap-feature-gates.py, gap-api-resources.py, gap-critical-alerts.py, gap-cluster-install.py, gap-e2e-validation.py)
+- **Exit 0 (PASS):** Always (informational only) OR dry-run mode. Check #12 still records FAIL in the report when e2e tests failed.
 - **Exit 1 (FAIL):** Only on execution error (network, invalid version, etc.)
 
 ### Combined Script (gap-all.sh)
-- **Exit 0 (PASS):** All checks 1-7 and 12 passed (checks 8-11 are informational) OR dry-run mode
-- **Exit 1 (FAIL):** Any of checks 1-7 or 12 failed OR execution error
+- **Exit 0 (PASS):** All checks 1-7 passed (checks 8-12 are informational) OR dry-run mode
+- **Exit 1 (FAIL):** Any of checks 1-7 failed OR execution error
 
 ## CI/CD Integration
 

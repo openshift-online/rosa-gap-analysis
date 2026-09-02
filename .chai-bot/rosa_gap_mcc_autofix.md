@@ -68,8 +68,8 @@ Permissions and files come from the JSON (`aws_sts.comparison.file_changes`, `ac
 | Result | Action |
 |--------|--------|
 | CHECK #1–#5 FAIL (missing STS/WIF/ack files) | Auto-fixable → continue |
-| Only CHECK #6, #7, or #12 FAIL | Slack note, **no MCC PR** |
-| CHECK #8–#11 only (informational) | Ignore |
+| Only CHECK #6 or #7 FAIL | Slack note, **no MCC PR** |
+| CHECK #8–#12 only (informational) | Ignore |
 | Missing artifacts / job error before reports | Slack note, **no MCC PR** |
 
 ### 3. Dedup — do not open a PR if one already exists
@@ -123,17 +123,55 @@ If generation fails, report the error and continue with the next minor. Do not o
 
 ### 5. Report
 
-Call `send_response(mode="report")` with a short Slack `mrkdwn` summary:
+Call `send_response(mode="report")` with Slack `mrkdwn`. Keep it short and scannable.
+
+**Date:** English month abbreviation, day without a leading zero, comma, year. Example: `Sep 1, 2026`. Never `2026-09-01` or `Sep 01, 2026`. Use the UTC date of this run.
+
+**Layout:**
 
 ```
-*ROSA gap-analysis MCC autofix — {DATE}*
+*ROSA gap-analysis MCC autofix — Sep 1, 2026*
 
-*PRs opened:* {N} ({links})
-*Skipped (PR already exists):* {N} ({links})
-*Not auto-fixable:* {N} ({job} — check 6/7/12 or missing artifacts)
+*Summary*
+• PRs opened: {N}
+• Skipped (PR already exists): {N}
+• Not auto-fixable: {N}
+
+*MCC PRs opened*
+• <{pr_url}|Add OCP {minor} Gap Analysis files>
+
+*Skipped — PR already open*
+• OCP {minor}: <{pr_url}|existing PR>
+
+*Not auto-fixable*
+• <{prow_url}|nightly-{major}-{minor}> — CHECK #{n} — {one-line reason}
+
+*Job results*
+• <{prow_url}|nightly-4-19>  :white_check_mark: SUCCESS
+• <{prow_url}|nightly-5-0>  :x: FAILURE — CHECK #6 not in channel (no MCC PR)
 ```
 
-Omit empty sections. Link Prow runs and MCC PRs. Do not include the `[Scheduled task: …]` metadata line.
+Rules:
+- Headline is always `*ROSA gap-analysis MCC autofix — {Mon D, YYYY}*`
+- Start with *Summary* (counts only). Omit a summary line whose count is 0.
+- Then detail sections that have items. Omit empty sections.
+- Link every Prow run (`<prow_url|nightly-X-Y>`) and every MCC PR (`<pr_url|title>`).
+- One bullet per job, sorted by version. SUCCESS / FAILURE / ERROR with `:white_check_mark:` / `:x:` / `:warning:`.
+- For FAILURE, add a short reason after an em dash. Do not dump JSON or full test lists.
+- CHECK #8–#12 are informational — do not list them under *Not auto-fixable*. A job that is red only because of those checks is still listed under *Job results*.
+- Do not include the `[Scheduled task: …]` metadata line.
+
+All-green on-demand example:
+
+```
+*ROSA gap-analysis MCC autofix — Sep 1, 2026*
+
+All watched periodics succeeded. No MCC PR needed.
+
+*Job results*
+• <{prow_url}|nightly-4-19>  :white_check_mark: SUCCESS
+• <{prow_url}|nightly-4-20>  :white_check_mark: SUCCESS
+```
 
 If nothing was opened, skipped, or notable: cron → `no_action_required(mode="report")`.
 

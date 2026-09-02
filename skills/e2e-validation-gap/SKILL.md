@@ -2,7 +2,8 @@
 name: e2e-validation-gap
 description: >
   Validate target-version ROSA e2e results and alert monitoring from existing
-  rosa-e2e JUnit. Standard check: failed tests FAIL; missing JUnit is SKIP.
+  rosa-e2e JUnit. Informational check: failed tests are reported as FAIL in the
+  report and do not fail the job; missing JUnit is SKIP.
   Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.
 compatibility:
   required_tools:
@@ -57,13 +58,13 @@ Looks for a future Ginkgo test name containing one of:
 - `no unexpected critical alerts`
 
 Until that test exists in rosa-e2e (planned for September), the subsection is
-**SKIP** and does not fail the check. If the test is present and failed, the
-check **FAIL**s.
+**SKIP**. If the test is present and failed, the report shows **FAIL** for that
+subsection; the job still exits 0.
 
 Do not treat Check #10 `alerts.json` as firing state — those are PrometheusRule
 definitions only.
 
 ## Exit Codes
 
-- `0` - PASS, or SKIP when JUnit is missing
-- `1` - FAIL (e2e test failures or alert monitoring failure) or execution error
+- `0` - Successful execution (informational; missing JUnit is SKIP; failed tests are reported)
+- `1` - Execution error

@@ -65,15 +65,17 @@ RUN arch=$(uname -m) && \
     chmod +x /usr/local/bin/ocm && \
     ocm version
 
-# Install rosa-cli
+# Install rosa-cli. From v1.2.65 the GitHub release is a zip
+# (rosa_linux_amd64.zip / rosa_linux_arm64.zip), not rosa_Linux_*.tar.gz.
 RUN arch=$(uname -m) && \
     case "${arch}" in \
-        x86_64)  arch="x86_64" ;; \
+        x86_64)  arch="amd64" ;; \
         aarch64) arch="arm64" ;; \
     esac && \
-    curl -fsSL "${ROSA_CLI_BASE_URL}/rosa_Linux_${arch}.tar.gz" -o /tmp/rosa.tar.gz && \
-    tar -xzf /tmp/rosa.tar.gz -C /usr/local/bin rosa && \
+    curl -fsSL "${ROSA_CLI_BASE_URL}/rosa_linux_${arch}.zip" -o /tmp/rosa.zip && \
+    python3 -c "import zipfile; zipfile.ZipFile('/tmp/rosa.zip').extractall('/usr/local/bin')" && \
     chmod +x /usr/local/bin/rosa && \
+    rm -f /tmp/rosa.zip && \
     rosa version
 
 

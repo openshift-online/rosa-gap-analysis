@@ -35,8 +35,8 @@ Identifies changes between OpenShift versions through 12 validation checks:
 **Check 11: Cluster Install and Delete Validation (Informational)**
 - **Check 11:** Cluster Install and Delete Validation - Compares live ClusterOperator/node install health from rosa-e2e post-phase snapshots (HCP, Classic, and OSD GCP; OSD GCP skipped for 5.x; informational; SKIP if snapshots are missing). Delete-duration metrics are not in the snapshot yet.
 
-**Check 12: Target E2E Validation and alert monitoring**
-- **Check 12:** Target E2E Validation and alert monitoring - Consumes target-version rosa-e2e JUnit from HCP, Classic, and OSD GCP. Failed tests FAIL. Missing JUnit is SKIP. OSD GCP is skipped for OpenShift 5.x. Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.
+**Check 12: Target E2E Validation and alert monitoring (Informational)**
+- **Check 12:** Target E2E Validation and alert monitoring - Consumes target-version rosa-e2e JUnit from HCP, Classic, and OSD GCP. Failed tests are reported as FAIL in the report and do not fail the job. Missing JUnit is SKIP. OSD GCP is skipped for OpenShift 5.x. Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.
 
 ## How It Works
 

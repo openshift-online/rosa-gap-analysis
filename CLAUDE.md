@@ -55,10 +55,10 @@ Claude follows an impact-based approach in this repository:
 - ROSA CLI (`rosa`) → ROSA HCP and OSD GCP marketplace availability (optional, graceful fallback)
 
 **Key Patterns:**
-- **Exit codes**: Checks 1-7 and CHECK #12 (Target E2E Validation) exit 1 on validation FAIL; CHECK #8 (Feature Gates), CHECK #9 (API Resources and CRD Diff Validation), CHECK #10 (Critical Alerts Diff Validation), and CHECK #11 (Cluster Install and Delete Validation) exit 0 even when differences are found (informational only); missing snapshots/JUnit for checks 9, 10, 11, and 12 are SKIP; all scripts exit 1 on execution errors
+- **Exit codes**: Checks 1-7 exit 1 on validation FAIL; CHECK #8 (Feature Gates), CHECK #9 (API Resources and CRD Diff Validation), CHECK #10 (Critical Alerts Diff Validation), CHECK #11 (Cluster Install and Delete Validation), and CHECK #12 (Target E2E Validation) exit 0 even when differences or e2e failures are found (informational only); missing snapshots/JUnit for checks 9, 10, 11, and 12 are SKIP; all scripts exit 1 on execution errors
 - **Version resolution**: CLI flags > env vars > auto-detect (Sippy API)
 - **Reports**: All scripts generate HTML/JSON simultaneously using Jinja2 templates
-- **Validation**: 12 globally numbered checks; checks 1-7 and CHECK #12 (Target E2E Validation) are standard (can FAIL); CHECK #8 (Feature Gates), CHECK #9 (API Resources and CRD Diff Validation), CHECK #10 (Critical Alerts Diff Validation), and CHECK #11 (Cluster Install and Delete Validation) are informational only. Feature Gates always executes last.
+- **Validation**: 12 globally numbered checks; checks 1-7 are standard (can FAIL); CHECK #8 (Feature Gates), CHECK #9 (API Resources and CRD Diff Validation), CHECK #10 (Critical Alerts Diff Validation), CHECK #11 (Cluster Install and Delete Validation), and CHECK #12 (Target E2E Validation) are informational only. Feature Gates always executes last.
 - **GA Readiness Validation**: Standalone script (`scripts/prod/gap-ga-validation.py`) for SREs to run manually; not part of CI pipeline
 - **5.x is AWS/STS-only**: All GCP/WIF checks are skipped for 5.x+ versions. Use `is_version_5x()` from `common.py`. OSD GCP skip is **per-version** (a 4.x baseline still gets GCP marketplace/WIF checked even when target is 5.x). Applies to `gap-gcp-wif.py`, `gap-ocm-version-gate.py`, `gap-versions-channels.py`, and `gap-ga-validation.py`. Checks #9–#12 compare `--topology hcp`, `--topology classic`, and `--topology osd-gcp`, each to itself. OSD GCP snapshots/JUnit are skipped when either compared minor is 5.x. Missing snapshots/JUnit → SKIP. 5.0 is treated as another OpenShift version.
 - **GA-aware channel checking**: `gap-versions-channels.py` checks all channels (candidate, fast, stable, eus) for GA versions but only candidate for pre-GA. This applies to both channel availability AND marketplace checks. Channel availability FAILs for GA or next-after-GA targets, WARNs for further-out dev versions
@@ -137,7 +137,7 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 | **9** | gap-api-resources.py | Live ROSA API Resources and CRD from Prow GCS snapshots (Info only). HCP, Classic, and OSD GCP, each compared to itself. OSD GCP skipped for 5.x. Missing snapshots → SKIP. | No |
 | **10** | gap-critical-alerts.py | Live ROSA PrometheusRule alerts from Prow GCS snapshots (Info only). Inherit/silence/review heuristics. Same topologies as Check #9. Missing snapshots → SKIP. | No |
 | **11** | gap-cluster-install.py | Live ROSA ClusterOperator/node install health from Prow GCS snapshots (Info only). Same topologies as Check #9. Missing snapshots → SKIP. Delete-duration metrics are not in the snapshot yet. | No |
-| **12** | gap-e2e-validation.py | Target-version rosa-e2e JUnit and alert monitoring (standard). HCP, Classic, and OSD GCP JUnit. OSD GCP skipped for 5.x. Missing JUnit → SKIP. Failed tests → FAIL. Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e (September). | Yes |
+| **12** | gap-e2e-validation.py | Target-version rosa-e2e JUnit and alert monitoring (Info only). HCP, Classic, and OSD GCP JUnit. OSD GCP skipped for 5.x. Missing JUnit → SKIP. Failed tests are reported as FAIL in the report and do not fail the job. Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e (September). | No |
 
 **Standalone (not in CI pipeline):**
 

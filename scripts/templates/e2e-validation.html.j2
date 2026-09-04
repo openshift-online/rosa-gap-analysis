@@ -30,13 +30,13 @@
             <p><strong>Baseline Version:</strong> <code>{{ baseline }}</code> (not consumed; target-only check)</p>
             <p><strong>Target Version:</strong> <code>{{ target }}</code></p>
             <p><strong>Source:</strong> <code>junit-rosa-e2e.xml</code> from Prow GCS (<code>as: rosa-e2e-test</code>)</p>
-            <p><strong>Result:</strong> {{ validation_result }}</p>
+            <p><strong>Result:</strong> {{ validation_result }} (informational)</p>
         </div>
         <p class="note">{{ note }}</p>
         {% include '_topology_coverage.html.j2' %}
 
         {% if validation_result == 'FAIL' %}
-        <div class="fail"><strong>Failed:</strong> target e2e and/or alert monitoring reported failures.</div>
+        <div class="fail"><strong>Failed (informational):</strong> target e2e and/or alert monitoring reported failures. This does not fail the gap-analysis job.</div>
         {% elif validation_result == 'SKIP' %}
         <div class="skip"><strong>Skipped:</strong> no target e2e JUnit was available for the requested topologies.</div>
         {% else %}

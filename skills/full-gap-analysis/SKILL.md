@@ -59,8 +59,8 @@ Automatically analyzes all of:
    - Critical Alerts Diff Validation (Check #10)
    - Cluster Install and Delete Validation (Check #11)
 
-6. **Target E2E Validation and alert monitoring (Check #12)**
-   - Target-version rosa-e2e JUnit
+6. **Target E2E Validation and alert monitoring (Check #12, informational)**
+   - Target-version rosa-e2e JUnit (failed tests are reported; they do not fail the job)
    - Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e
 
 The script runs all analyses and reports if differences exist in any area.

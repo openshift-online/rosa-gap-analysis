@@ -181,7 +181,7 @@ Generates:
 - SKIP when Cluster Install snapshots are not yet in GCS
 - Note: the CI step captures install health before deprovision; delete-duration metrics are not in the snapshot yet
 
-### Target E2E Validation and alert monitoring (Check 12)
+### Target E2E Validation and alert monitoring (Check 12 - Informational)
 
 ```bash
 python3 scripts/gap-e2e-validation.py --baseline 4.20 --target 4.21
@@ -192,8 +192,8 @@ Generates:
 - `gap-analysis-e2e-validation_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
 
 **Report Contents:**
-- **Check 12:** Target-version rosa-e2e JUnit (`junit-rosa-e2e.xml` from `as: rosa-e2e-test`)
-- Per-topology PASS/FAIL/SKIP and failed test names
+- **Check 12:** Target-version rosa-e2e JUnit (`junit-rosa-e2e.xml` from `as: rosa-e2e-test`) (informational)
+- Per-topology PASS/FAIL/SKIP and failed test names (FAIL in the report does not fail the job)
 - Alert monitoring subsection (SKIP until VerifyNoCriticalAlerts exists in rosa-e2e)
 - OSD GCP skipped when the target is 5.x
 - SKIP when JUnit is not yet in GCS
@@ -242,7 +242,7 @@ bash scripts/gap-all.sh --baseline 4.20 --target 4.21
 - **Check 9:** API Resources and CRD Diff Validation (informational)
 - **Check 10:** Critical Alerts Diff Validation (informational)
 - **Check 11:** Cluster Install and Delete Validation (informational)
-- **Check 12:** Target E2E Validation and alert monitoring
+- **Check 12:** Target E2E Validation and alert monitoring (informational)
 - Aggregate statistics
 - Timestamp and version information
 

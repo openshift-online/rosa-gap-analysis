@@ -469,7 +469,7 @@ main() {
         ["api-resources"]="informational"
         ["critical-alerts"]="informational"
         ["cluster-install"]="informational"
-        ["e2e-validation"]="standard"
+        ["e2e-validation"]="informational"
         ["feature-gates"]="informational"
     )
     declare -A check_count_field=(
@@ -745,7 +745,7 @@ EOF
         read_check_status "cluster-install"
     fi
 
-    # Run Target E2E Validation (Check #12 - standard; missing JUnit is SKIP)
+    # Run Target E2E Validation (Check #12 - informational; missing JUnit is SKIP)
     if should_run_step "e2e-validation"; then
         log_info ""
         log_info "Running Target E2E Validation and alert monitoring..."

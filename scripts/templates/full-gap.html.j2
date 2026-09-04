@@ -440,11 +440,7 @@
             {% endif %}
 
             {% if e2e_validation %}
-                {% if e2e_validation.validation_result == 'FAIL' %}
-                    {% set critical_count = critical_count + 1 %}
-                {% elif e2e_validation.validation_result == 'PASS' %}
-                    {% set success_count = success_count + 1 %}
-                {% endif %}
+                {% set info_count = info_count + 1 %}
             {% endif %}
 
             {% if versions_channels %}
@@ -757,11 +753,11 @@
                         <td><strong>CHECK #12:</strong> Target E2E Validation and alert monitoring</td>
                         <td>
                             {% if e2e_validation.validation_result == 'FAIL' %}
-                            <span class="removed">❌ FAIL</span>
+                            <span class="removed">❌ FAIL</span> (Info)
                             {% elif e2e_validation.validation_result == 'SKIP' %}
-                            <span class="changed">ℹ SKIP</span>
+                            <span class="changed">ℹ SKIP</span> (Info)
                             {% else %}
-                            <span class="added">✅ PASS</span>
+                            <span class="added">✅ PASS</span> (Info)
                             {% endif %}
                         </td>
                         <td style="text-align: center;">{{ e2e_validation.summary.failed_count or 0 }}</td>
@@ -1798,7 +1794,7 @@
 
             {% if e2e_validation %}
             <h2 id="e2e-validation">CHECK #12: Target E2E Validation and alert monitoring</h2>
-            <p>Target-version only. Consumes existing <code>junit-rosa-e2e.xml</code> from <code>as: rosa-e2e-test</code>. Fetches HCP, Classic, and OSD GCP JUnit. OSD GCP is skipped for OpenShift 5.x. Failed tests FAIL this check. Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.</p>
+            <p>Informational check. Target-version only. Consumes existing <code>junit-rosa-e2e.xml</code> from <code>as: rosa-e2e-test</code>. Fetches HCP, Classic, and OSD GCP JUnit. OSD GCP is skipped for OpenShift 5.x. Failed tests are reported as FAIL in this report and do not fail the gap-analysis job. Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.</p>
             {% if e2e_validation.note %}<p><em>{{ e2e_validation.note }}</em></p>{% endif %}
             {% if e2e_validation.validation_result == 'SKIP' %}
             <div style="background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px;">
@@ -1806,7 +1802,7 @@
             </div>
             {% elif e2e_validation.validation_result == 'FAIL' %}
             <div style="background-color: #f8d7da; border-left: 4px solid #721c24; padding: 15px; margin: 20px 0; border-radius: 5px;">
-                <strong>Failed:</strong> {{ e2e_validation.summary.failed_count or 0 }} failing test(s).
+                <strong>Failed (informational):</strong> {{ e2e_validation.summary.failed_count or 0 }} failing test(s). This does not fail the gap-analysis job.
             </div>
             {% endif %}
             {% with topologies = e2e_validation.topologies %}

@@ -1,6 +1,6 @@
 # Validation Checks
 
-The gap analysis framework performs 12 validation checks across all scripts.
+The gap analysis framework performs 13 validation checks across all scripts.
 
 ## Check Numbering
 
@@ -20,6 +20,7 @@ All scripts use a consistent global check numbering system:
 | **10** | Critical Alerts Diff Validation | Compares live PrometheusRule alerting rules from HCP, Classic, and OSD GCP cluster snapshots. Same topologies as Check #9. Identifies new critical alerts, modified queries/thresholds/severity, and recommends inherit vs silence vs review. Missing snapshots are SKIP. | Always PASS (exit code 0) |
 | **11** | Cluster Install and Delete Validation | Compares live ClusterOperator and node health from HCP, Classic, and OSD GCP cluster snapshots taken in the rosa-e2e **post** phase (before deprovision). Same topologies as Check #9. Identifies new/removed operators, newly degraded/unavailable operators, and NotReady nodes. Delete-duration metrics are not in the snapshot yet. Missing snapshots are SKIP. | Always PASS (exit code 0) |
 | **12** | Target E2E Validation and alert monitoring | Consumes target-version `junit-rosa-e2e.xml` from the existing rosa-e2e test step. Does not compare baseline vs target. Fetches HCP, Classic, and OSD GCP JUnit. OSD GCP is skipped for OpenShift 5.x. Missing JUnit is SKIP. Failed e2e tests are reported as FAIL in the report and do not fail the job. Alert monitoring looks for a future VerifyNoCriticalAlerts test; until it exists the subsection is SKIP and does not fail the check. | Informational FAIL does not fail the job (exit 0); execution error exits 1 |
+| **13** | Upgrade Validation from Y-1 to Y with E2E Tests | Consumes existing rosa-e2e Y-1 → Y upgrade periodics (HCP, Classic STS, and OSD GCP). Does not provision clusters. Missing upgrade JUnit is SKIP. Failed post-upgrade e2e tests FAIL. Post-upgrade degraded/unavailable ClusterOperators FAIL when a JSON or oc-get txt snapshot is present. Duration comes from `upgrade-metrics.json` or `finished.json` timestamps. Missing duration and pre-upgrade COs are subsection SKIP. | Exit code 1 on FAIL |
 
 
 ## Check Execution by Script
@@ -56,6 +57,9 @@ All scripts use a consistent global check numbering system:
 ### gap-e2e-validation.py
 - **Check 12:** Target E2E Validation and alert monitoring (Info only; consumes target-version junit-rosa-e2e.xml)
 
+### gap-upgrade-e2e.py
+- **Check 13:** Upgrade Validation from Y-1 to Y with E2E Tests (standard; consumes rosa-e2e Y-1 upgrade periodics)
+
 ### gap-all.sh (Combined)
 Runs all checks in order:
 1. AWS STS (Checks 1-2)
@@ -67,7 +71,8 @@ Runs all checks in order:
 7. Critical Alerts Diff Validation (Check 10)
 8. Cluster Install and Delete Validation (Check 11)
 9. Target E2E Validation and alert monitoring (Check 12)
-10. Feature Gates (Check 8) - Info only, always executed last
+10. Upgrade Validation from Y-1 to Y with E2E Tests (Check 13)
+11. Feature Gates (Check 8) - Info only, always executed last
 
 ### Standalone (not part of CI)
 - **scripts/prod/gap-ga-validation.py** — GA Readiness Validation (run manually by SREs). See [ga-readiness-validation.md](ga-readiness-validation.md).
@@ -399,6 +404,35 @@ When no admin gates exist in cluster-version-operator, acknowledgment files use 
 - Missing alert-monitoring test is SKIP for that subsection and does not fail the check
 - OSD GCP is skipped for OpenShift 5.x (AWS/STS-only)
 
+### Check 13: Upgrade Validation from Y-1 to Y with E2E Tests
+
+**What it analyzes:**
+- Post-upgrade rosa-e2e JUnit from Y-1 → Y upgrade periodics
+- Post-upgrade ClusterOperator health from JSON snapshots or `oc get co -o wide` txt dumps
+- Upgrade duration from `upgrade-metrics.json` or `finished.json` timestamps (operators-ready → upgrade step)
+- Pre-upgrade ClusterOperator health and CO status changes when the upgrade step published a before-snapshot
+- Heuristic grouping of failed tests (workloads, storage, network, managed operators)
+
+**Data source:**
+- Prow jobs:
+  - `periodic-ci-openshift-online-rosa-e2e-main-upgrade-rosa-hcp-upgrade-staging-y-minus-1`
+  - `periodic-ci-openshift-online-rosa-e2e-main-upgrade-rosa-classic-sts-upgrade-staging-y-minus-1`
+  - `periodic-ci-openshift-online-rosa-e2e-main-upgrade-osd-gcp-upgrade-staging-y-minus-1`
+- Post-upgrade `junit-rosa-e2e.xml` from `as: rosa-e2e-test`
+- Post-upgrade Cluster Install snapshot (`clusteroperators.json` or `clusteroperators.txt`) from the same upgrade job
+- `upgrade-metrics.json` when published; otherwise step `finished.json` timestamps
+- Pre-upgrade `pre-upgrade-clusteroperators.json` from the upgrade step when published
+- Does not provision or upgrade clusters; Check #12 remains target-version fresh-install JUnit
+
+**Pass criteria:**
+- PASS when parsed JUnit has no failing tests and post-upgrade COs (when present) are healthy
+- SKIP when upgrade JUnit is missing, or no recent upgrade job matches the resolved target minor
+- FAIL when e2e tests fail, a post-upgrade snapshot shows degraded/unavailable ClusterOperators, or a pre-upgrade snapshot shows the cluster was unhealthy before upgrade
+- Missing duration and missing pre-upgrade COs are SKIP for those subsections and do not fail the check
+- OSD GCP missing JUnit is SKIP until the y-minus-1 upgrade periodic has published artifacts
+- OpenShift **5.x is AWS/STS-only**: use HCP/Classic for upgrades into 5.x. OSD GCP → 5.x is not a supported product path (expect SKIP / no matching job)
+- Only consume a build whose post-upgrade ClusterOperator VERSION (or `cluster_version`) minor matches the resolved target
+
 ## Version Resolution
 
 ### OpenShift 5.x Major Version Mapping
@@ -471,8 +505,8 @@ python3 ./scripts/gap-aws-sts.py --baseline 4.23 --target 5.0
 
 ## Exit Codes
 
-### Individual Scripts (gap-aws-sts.py, gap-gcp-wif.py, gap-ocp-gate-ack.py, gap-versions-channels.py, gap-ocm-version-gate.py)
-- **Exit 0 (PASS):** All relevant checks passed OR dry-run mode
+### Individual Scripts (gap-aws-sts.py, gap-gcp-wif.py, gap-ocp-gate-ack.py, gap-versions-channels.py, gap-ocm-version-gate.py, gap-e2e-validation.py, gap-upgrade-e2e.py)
+- **Exit 0 (PASS):** All relevant checks passed OR dry-run mode (Checks #12 and #13 also exit 0 on SKIP)
 - **Exit 1 (FAIL):** One or more checks failed OR execution error
 
 ### Informational Scripts (gap-feature-gates.py, gap-api-resources.py, gap-critical-alerts.py, gap-cluster-install.py, gap-e2e-validation.py)
@@ -480,8 +514,8 @@ python3 ./scripts/gap-aws-sts.py --baseline 4.23 --target 5.0
 - **Exit 1 (FAIL):** Only on execution error (network, invalid version, etc.)
 
 ### Combined Script (gap-all.sh)
-- **Exit 0 (PASS):** All checks 1-7 passed (checks 8-12 are informational) OR dry-run mode
-- **Exit 1 (FAIL):** Any of checks 1-7 failed OR execution error
+- **Exit 0 (PASS):** All checks 1-7, 12, and 13 passed (checks 8-11 are informational) OR dry-run mode
+- **Exit 1 (FAIL):** Any of checks 1-7, 12, or 13 failed OR execution error
 
 ## CI/CD Integration
 

@@ -198,6 +198,23 @@ Generates:
 - OSD GCP skipped when the target is 5.x
 - SKIP when JUnit is not yet in GCS
 
+### Upgrade Validation from Y-1 to Y with E2E Tests (Check 13)
+
+```bash
+python3 scripts/gap-upgrade-e2e.py --baseline 4.20 --target 4.21
+```
+
+Generates:
+- `gap-analysis-upgrade-e2e_4.20_to_4.21_YYYYMMDD_HHMMSS.html`
+- `gap-analysis-upgrade-e2e_4.20_to_4.21_YYYYMMDD_HHMMSS.json`
+
+**Report Contents:**
+- **Check 13:** Y-1 → Y upgrade path from rosa-e2e HCP, Classic, and OSD GCP upgrade periodics
+- Per-topology PASS/FAIL/SKIP, failed test names, and post-upgrade ClusterOperator health
+- Upgrade duration from `upgrade-metrics.json` or `finished.json` timestamps
+- Pre-upgrade COs and CO status changes when a before-snapshot is published; otherwise SKIP
+- SKIP when upgrade JUnit is not yet in GCS, or no job matches the resolved target minor
+
 ### Feature Gate Gap Analysis (Check 8 - Informational)
 
 ```bash

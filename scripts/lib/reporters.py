@@ -78,6 +78,8 @@ def generate_html_report(data: Dict[str, Any], output_file: str = None) -> str:
         template = jinja_env.get_template('versions-channels.html.j2')
     elif 'GA Readiness' in report_type or 'GA Validation' in report_type:
         template = jinja_env.get_template('ga-validation.html.j2')
+    elif "Upgrade Validation from Y-1 to Y" in report_type:
+        template = jinja_env.get_template('upgrade-e2e.html.j2')
     elif report_type == "Target E2E Validation and alert monitoring" or "E2E Validation" in report_type:
         template = jinja_env.get_template('e2e-validation.html.j2')
     elif report_type == "Critical Alerts Diff Validation" or "Critical Alerts" in report_type:

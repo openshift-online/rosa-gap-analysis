@@ -18,7 +18,7 @@ This framework helps platform teams identify IAM permission and feature gate cha
 
 ### What It Analyzes
 
-The framework performs **12 validation checks** across all scripts:
+The framework performs **13 validation checks** across all scripts:
 
 | Check # | Analysis Type | Description | Pass/Fail Impact |
 |---------|---------------|-------------|------------------|
@@ -34,6 +34,7 @@ The framework performs **12 validation checks** across all scripts:
 | **10** | Critical Alerts Diff Validation | Compares live PrometheusRule alerts; recommends inherit / silence / review. Same topologies as Check #9. | Always PASS (SKIP if snapshots missing) |
 | **11** | Cluster Install and Delete Validation | Compares live ClusterOperator/node install health (same topologies as Check #9). Delete-duration metrics are not in the snapshot yet. | Always PASS (SKIP if snapshots missing) |
 | **12** | Target E2E Validation and alert monitoring | Target-version rosa-e2e JUnit (`junit-rosa-e2e.xml`). HCP, Classic, and OSD GCP. OSD GCP skipped for 5.x. Missing JUnit is SKIP. Failed tests are reported as FAIL in the report (current e2e quality) and do not fail the job. Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e. | Always PASS (SKIP if JUnit missing) |
+| **13** | Upgrade Validation from Y-1 to Y with E2E Tests | Y-1 → Y upgrade path from rosa-e2e HCP, Classic, and OSD GCP upgrade periodics. Missing JUnit is SKIP. Failed post-upgrade e2e or unhealthy ClusterOperators FAIL. | Exit 1 on FAIL |
 
 See [Validation Checks](docs/validation-checks.md) for detailed information about each check.
 
@@ -194,6 +195,7 @@ gap-analysis/
 │   ├── gap-critical-alerts.py # Critical Alerts Diff Validation
 │   ├── gap-cluster-install.py # Cluster Install and Delete Validation
 │   ├── gap-e2e-validation.py # Target E2E Validation and alert monitoring
+│   ├── gap-upgrade-e2e.py   # Upgrade Validation from Y-1 to Y with E2E Tests
 │   ├── gap-all.sh           # Run all analyses
 │   ├── lib/                 # Shared libraries
 │   └── prod/                # Production scripts (GA readiness validation)
@@ -234,7 +236,8 @@ Scripts are designed for CI/CD integration:
 | `gap-critical-alerts.py` | Always on success | Execution error only (check 10 is informational; missing snapshots SKIP) |
 | `gap-cluster-install.py` | Always on success | Execution error only (check 11 is informational; missing snapshots SKIP) |
 | `gap-e2e-validation.py` | Always on success | Execution error only (check 12 is informational; missing JUnit SKIP; failed tests reported in the report) |
-| `gap-all.sh` | All checks 1-7 pass | Any check 1-7 fails OR execution error |
+| `gap-upgrade-e2e.py` | PASS or SKIP (missing upgrade JUnit) | Execution error OR validation FAIL (check 13; failed post-upgrade e2e or unhealthy COs) |
+| `gap-all.sh` | All checks 1-7 and 13 pass | Any check 1-7 or 13 fails OR execution error |
 
 **Important:** Validation distinguishes between **errors** and **warnings**:
 - **ERRORS** (missing expected changes): Validation FAILS → exit 1

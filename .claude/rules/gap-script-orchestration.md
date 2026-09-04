@@ -137,11 +137,11 @@ I've detected a new gap script. Let me orchestrate all the related changes.
 
 ## Version 5.x Platform Rules
 
-OpenShift 5.x is **AWS/STS-only** — all GCP/WIF checks must be skipped for 5.x+ versions. Checks #9–#12 use `--topology hcp`, `--topology classic`, and `--topology osd-gcp`; each topology is compared to itself. OSD GCP snapshots/JUnit are skipped when either compared minor is 5.x (5.x has no OSD GCP jobs). Missing snapshots/JUnit are SKIP. Treat 5.0 as another OpenShift version with those conditions.
+OpenShift 5.x is **AWS/STS-only** — all GCP/WIF checks must be skipped for 5.x+ versions. Checks #9–#12 use `--topology hcp`, `--topology classic`, and `--topology osd-gcp`; each topology is compared to itself. OSD GCP snapshots/JUnit are skipped when either compared minor is 5.x (5.x has no OSD GCP fresh-install jobs). Check #13 covers HCP, Classic, and OSD GCP (`osd-gcp-upgrade-staging-y-minus-1`); missing JUnit is SKIP. For **5.x targets**, upgrade validation is HCP/Classic only as a product path (OSD GCP → 5.x is not supported; expect SKIP). Treat 5.0 as another OpenShift version with those conditions.
 
 **Detection:** Use `is_version_5x(minor_version)` from `scripts/lib/common.py`. Returns `True` when major version ≥ 5.
 
-**Marketplace per-version skip:** GCP marketplace/WIF skip is applied per-version, not globally. For a 4.22 → 5.0 upgrade, baseline 4.22 still gets GCP marketplace/WIF checked; only the 5.0 side is skipped. Use `skip_gcp_baseline` and `skip_gcp_target` separately — never a single `skip_gcp` flag. Snapshot Checks #9–#12 are different: OSD GCP is skipped for the whole comparison when any compared minor is 5.x.
+**Marketplace per-version skip:** GCP marketplace/WIF skip is applied per-version, not globally. For a 4.22 → 5.0 upgrade, baseline 4.22 still gets GCP marketplace/WIF checked; only the 5.0 side is skipped. Use `skip_gcp_baseline` and `skip_gcp_target` separately — never a single `skip_gcp` flag. Snapshot Checks #9–#12 are different: OSD GCP is skipped for the whole comparison when any compared minor is 5.x. Check #13 includes OSD GCP for **4.x** upgrade paths; for 5.x targets prefer HCP/Classic examples (OSD GCP → 5.x is not a product path; missing JUnit → SKIP).
 
 | Script | Guard Pattern | What's Skipped |
 |--------|--------------|----------------|
@@ -152,6 +152,7 @@ OpenShift 5.x is **AWS/STS-only** — all GCP/WIF checks must be skipped for 5.x
 | `gap-critical-alerts.py` | Same as Check #9 | Missing snapshot; OSD GCP on 5.x |
 | `gap-cluster-install.py` | Same as Check #9 | Missing snapshot; OSD GCP on 5.x |
 | `gap-e2e-validation.py` | Target-only HCP, Classic, and OSD GCP JUnit | Missing target JUnit; OSD GCP on 5.x |
+| `gap-upgrade-e2e.py` | HCP, Classic, and OSD GCP Y-1 → Y upgrade JUnit | Missing upgrade JUnit |
 | `gap-ga-validation.py` | `_skip_gcp` flag: GCP handled within combined `check_marketplace_availability()`; excludes `check_gcp_wif_compatibility` from `all_checks` | GCP marketplace (via `_skip_gcp` in combined check) + WIF template checks |
 
 **When adding a new gap script with GCP/WIF checks:** Add a 5.x guard using `is_version_5x()` and document it in this table.

@@ -33,12 +33,13 @@ Optional Arguments:
   --target <version>       Target version (must be used with --baseline)
   --version <version>      Single version to analyze (auto-resolves baseline and target)
   --steps <steps>          Comma-separated list of steps to run (default: all)
-                           Available: aws,gcp,ocp,versions-channels,ocm-version-gate,api-resources,critical-alerts,cluster-install,e2e-validation,feature-gates
+                           Available: aws,gcp,ocp,versions-channels,ocm-version-gate,api-resources,critical-alerts,cluster-install,e2e-validation,upgrade-e2e,feature-gates
                            Example: --steps aws,gcp (runs only AWS and GCP)
                            Example: --steps api-resources (runs only API Resources and CRD comparison)
                            Example: --steps critical-alerts (runs only Critical Alerts Diff Validation)
                            Example: --steps cluster-install (runs only Cluster Install and Delete Validation)
                            Example: --steps e2e-validation (runs only Target E2E Validation and alert monitoring)
+                           Example: --steps upgrade-e2e (runs only Upgrade Validation from Y-1 to Y with E2E Tests)
   --dry-run                Show resolved versions and exit without running analysis
   --verbose                Enable verbose logging
   --report-dir <path>      Directory to store reports (default: reports/)
@@ -289,9 +290,9 @@ if [[ -n "$STEPS" ]]; then
         # Trim whitespace
         step=$(echo "$step" | xargs)
 
-        if [[ "$step" != "aws" ]] && [[ "$step" != "gcp" ]] && [[ "$step" != "ocp" ]] && [[ "$step" != "versions-channels" ]] && [[ "$step" != "ocm-version-gate" ]] && [[ "$step" != "api-resources" ]] && [[ "$step" != "critical-alerts" ]] && [[ "$step" != "cluster-install" ]] && [[ "$step" != "e2e-validation" ]] && [[ "$step" != "feature-gates" ]]; then
+        if [[ "$step" != "aws" ]] && [[ "$step" != "gcp" ]] && [[ "$step" != "ocp" ]] && [[ "$step" != "versions-channels" ]] && [[ "$step" != "ocm-version-gate" ]] && [[ "$step" != "api-resources" ]] && [[ "$step" != "critical-alerts" ]] && [[ "$step" != "cluster-install" ]] && [[ "$step" != "e2e-validation" ]] && [[ "$step" != "upgrade-e2e" ]] && [[ "$step" != "feature-gates" ]]; then
             log_error "Invalid step: $step"
-            log_error "Valid steps are: aws, gcp, ocp, versions-channels, ocm-version-gate, api-resources, critical-alerts, cluster-install, e2e-validation, feature-gates"
+            log_error "Valid steps are: aws, gcp, ocp, versions-channels, ocm-version-gate, api-resources, critical-alerts, cluster-install, e2e-validation, upgrade-e2e, feature-gates"
             exit 1
         fi
     done
@@ -299,7 +300,7 @@ if [[ -n "$STEPS" ]]; then
     log_info "Steps to run: ${STEPS_ARRAY[*]}"
 else
     # Default: run all steps
-    STEPS_ARRAY=("aws" "gcp" "ocp" "versions-channels" "ocm-version-gate" "api-resources" "critical-alerts" "cluster-install" "e2e-validation" "feature-gates")
+    STEPS_ARRAY=("aws" "gcp" "ocp" "versions-channels" "ocm-version-gate" "api-resources" "critical-alerts" "cluster-install" "e2e-validation" "upgrade-e2e" "feature-gates")
 fi
 
 # Dry-run mode: show resolved versions and exit
@@ -319,7 +320,7 @@ if [[ "$DRY_RUN" == "true" ]]; then
     if [[ -n "$STEPS" ]]; then
         log_info "Steps to run: ${STEPS_ARRAY[*]}"
     else
-        log_info "Steps to run: all (aws, gcp, ocp, ocm-version-gate, versions-channels, api-resources, critical-alerts, cluster-install, e2e-validation, feature-gates)"
+        log_info "Steps to run: all (aws, gcp, ocp, ocm-version-gate, versions-channels, api-resources, critical-alerts, cluster-install, e2e-validation, upgrade-e2e, feature-gates)"
     fi
     log_info "========================================="
     log_info "Exiting without running gap analysis"
@@ -363,6 +364,7 @@ main() {
             critical-alerts) checks_desc="${checks_desc}Critical Alerts Diff Validation, " ;;
             cluster-install) checks_desc="${checks_desc}Cluster Install and Delete Validation, " ;;
             e2e-validation) checks_desc="${checks_desc}Target E2E Validation and alert monitoring, " ;;
+            upgrade-e2e) checks_desc="${checks_desc}Upgrade Validation from Y-1 to Y with E2E Tests, " ;;
             feature-gates) checks_desc="${checks_desc}Feature Gates, " ;;
         esac
     done
@@ -384,6 +386,7 @@ main() {
         ["critical-alerts"]=0
         ["cluster-install"]=0
         ["e2e-validation"]=0
+        ["upgrade-e2e"]=0
         ["feature-gates"]=0
     )
     declare -A check_status=(
@@ -396,6 +399,7 @@ main() {
         ["critical-alerts"]=""
         ["cluster-install"]=""
         ["e2e-validation"]=""
+        ["upgrade-e2e"]=""
         ["feature-gates"]=""
     )
     declare -A check_message=(
@@ -408,6 +412,7 @@ main() {
         ["critical-alerts"]=""
         ["cluster-install"]=""
         ["e2e-validation"]=""
+        ["upgrade-e2e"]=""
         ["feature-gates"]=""
     )
     declare -A check_diff_count=(
@@ -420,6 +425,7 @@ main() {
         ["critical-alerts"]=0
         ["cluster-install"]=0
         ["e2e-validation"]=0
+        ["upgrade-e2e"]=0
         ["feature-gates"]=0
     )
 
@@ -434,6 +440,7 @@ main() {
         ["critical-alerts"]=10
         ["cluster-install"]=11
         ["e2e-validation"]=12
+        ["upgrade-e2e"]=13
         ["feature-gates"]=8
     )
     declare -A check_display_num=(
@@ -446,6 +453,7 @@ main() {
         ["critical-alerts"]=10
         ["cluster-install"]=11
         ["e2e-validation"]=12
+        ["upgrade-e2e"]=13
         ["feature-gates"]=8
     )
     declare -A check_name=(
@@ -458,6 +466,7 @@ main() {
         ["critical-alerts"]="Critical Alerts Diff Validation"
         ["cluster-install"]="Cluster Install and Delete Validation"
         ["e2e-validation"]="Target E2E Validation and alert monitoring"
+        ["upgrade-e2e"]="Upgrade Validation from Y-1 to Y with E2E Tests"
         ["feature-gates"]="Feature Gates Gap"
     )
     declare -A check_type=(
@@ -470,6 +479,7 @@ main() {
         ["critical-alerts"]="informational"
         ["cluster-install"]="informational"
         ["e2e-validation"]="informational"
+        ["upgrade-e2e"]="standard"
         ["feature-gates"]="informational"
     )
     declare -A check_count_field=(
@@ -482,6 +492,7 @@ main() {
         ["critical-alerts"]="differences_count"
         ["cluster-install"]="differences_count"
         ["e2e-validation"]="differences_count"
+        ["upgrade-e2e"]="differences_count"
         ["feature-gates"]="total_changes"
     )
 
@@ -764,6 +775,25 @@ EOF
         read_check_status "e2e-validation"
     fi
 
+    # Run Upgrade Validation from Y-1 to Y with E2E Tests (Check #13 - standard; missing JUnit is SKIP)
+    if should_run_step "upgrade-e2e"; then
+        log_info ""
+        log_info "Running Upgrade Validation from Y-1 to Y with E2E Tests..."
+        if python3 "${SCRIPT_DIR}/gap-upgrade-e2e.py" \
+            --baseline "$BASELINE" \
+            --target "$TARGET" \
+            --report-dir "$REPORT_DIR" \
+            $VERBOSE_FLAG 2>&1; then
+            check_results["upgrade-e2e"]=0
+        else
+            local exit_code=$?
+            check_results["upgrade-e2e"]=1
+            log_error "Upgrade Validation from Y-1 to Y with E2E Tests script failed with exit code $exit_code"
+        fi
+
+        read_check_status "upgrade-e2e"
+    fi
+
     # Run Feature Gates analysis (Info only - always passes)
     # IMPORTANT: Feature Gates must always be the last check to execute, even if new checks are added in the future
     if should_run_step "feature-gates"; then
@@ -807,7 +837,7 @@ EOF
     # If feature_gates_result=1, it means script execution error, which should fail
     local should_exit_fail=false
 
-    for step in aws gcp ocp versions-channels ocm-version-gate api-resources critical-alerts cluster-install e2e-validation feature-gates; do
+    for step in aws gcp ocp versions-channels ocm-version-gate api-resources critical-alerts cluster-install e2e-validation upgrade-e2e feature-gates; do
         if should_run_step "$step" && [[ ${check_results[$step]} -eq 1 ]]; then
             should_exit_fail=true
             break
@@ -851,7 +881,7 @@ EOF
     local any_failed="$should_exit_fail"
 
     # Print individual check results
-    for step in aws gcp ocp versions-channels ocm-version-gate api-resources critical-alerts cluster-install e2e-validation feature-gates; do
+    for step in aws gcp ocp versions-channels ocm-version-gate api-resources critical-alerts cluster-install e2e-validation upgrade-e2e feature-gates; do
         if should_run_step "$step"; then
             print_individual_check "$step" "${check_display_num[$step]}" "${check_name[$step]}" \
                 "${check_results[$step]}" "${check_diff_count[$step]}" "${check_message[$step]}" \
@@ -863,7 +893,7 @@ EOF
 
     # Overall status with warnings
     local has_warnings=false
-    for step in aws gcp ocp versions-channels ocm-version-gate api-resources critical-alerts cluster-install e2e-validation feature-gates; do
+    for step in aws gcp ocp versions-channels ocm-version-gate api-resources critical-alerts cluster-install e2e-validation upgrade-e2e feature-gates; do
         if should_run_step "$step" && [[ ${check_results[$step]} -eq 0 ]] && [[ ${check_diff_count[$step]} -gt 0 ]]; then
             has_warnings=true
             break

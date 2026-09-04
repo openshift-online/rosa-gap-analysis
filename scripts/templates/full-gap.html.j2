@@ -443,6 +443,14 @@
                 {% set info_count = info_count + 1 %}
             {% endif %}
 
+            {% if upgrade_e2e %}
+                {% if upgrade_e2e.validation_result == 'FAIL' %}
+                    {% set critical_count = critical_count + 1 %}
+                {% elif upgrade_e2e.validation_result == 'PASS' %}
+                    {% set success_count = success_count + 1 %}
+                {% endif %}
+            {% endif %}
+
             {% if versions_channels %}
                 {% if versions_channels.validation_result == 'FAIL' %}
                     {% set critical_count = critical_count + 1 %}
@@ -772,6 +780,36 @@
                             skip {{ e2e_validation.summary.alert_monitoring_skip or 0 }}
                             {% if e2e_validation.summary.compared_topologies %}
                             | {{ e2e_validation.summary.compared_topologies | map('topology_label') | join(', ') }}
+                            {% endif %}
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endif %}
+
+                    {% if upgrade_e2e %}
+                    <tr>
+                        <td><strong>CHECK #13:</strong> Upgrade Validation from Y-1 to Y with E2E Tests</td>
+                        <td>
+                            {% if upgrade_e2e.validation_result == 'FAIL' %}
+                            <span class="removed">❌ FAIL</span>
+                            {% elif upgrade_e2e.validation_result == 'SKIP' %}
+                            <span class="changed">ℹ SKIP</span>
+                            {% else %}
+                            <span class="added">✅ PASS</span>
+                            {% endif %}
+                        </td>
+                        <td style="text-align: center;">{{ upgrade_e2e.summary.failed_count or 0 }}</td>
+                        <td style="text-align: center;">{{ upgrade_e2e.summary.skipped or 0 }}</td>
+                        <td>
+                            {% if upgrade_e2e.validation_result == 'SKIP' %}
+                            {{ upgrade_e2e.error_message or upgrade_e2e.note or 'waiting for Y-1 upgrade JUnit' }}
+                            {% else %}
+                            tests {{ upgrade_e2e.summary.tests or 0 }} |
+                            failures {{ upgrade_e2e.summary.failures or 0 }} |
+                            degraded COs {{ upgrade_e2e.summary.degraded_operators or 0 }} /
+                            unavailable {{ upgrade_e2e.summary.unavailable_operators or 0 }}
+                            {% if upgrade_e2e.summary.compared_topologies %}
+                            | {{ upgrade_e2e.summary.compared_topologies | map('topology_label') | join(', ') }}
                             {% endif %}
                             {% endif %}
                         </td>
@@ -1840,6 +1878,85 @@
             {% endif %}
             {% if topo.failed_cases %}
             <h4>Failed tests</h4>
+            <ul>{% for case in topo.failed_cases %}<li><code>{{ case.name }}</code>{% if case.message %} — {{ case.message }}{% endif %}</li>{% endfor %}</ul>
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+
+            {% if upgrade_e2e %}
+            <h2 id="upgrade-e2e">CHECK #13: Upgrade Validation from Y-1 to Y with E2E Tests</h2>
+            <p>Consumes existing rosa-e2e Y-1 → Y upgrade periodics (HCP, Classic STS, and OSD GCP). Does not provision clusters. Check #12 remains target-version fresh-install JUnit. Failed post-upgrade tests FAIL. Degraded or unavailable ClusterOperators FAIL when a post-upgrade JSON or oc-get txt snapshot is present. Duration is taken from upgrade-metrics.json or finished.json. Missing duration or pre-upgrade COs are SKIP. Missing upgrade JUnit is SKIP.</p>
+            {% if upgrade_e2e.note %}<p><em>{{ upgrade_e2e.note }}</em></p>{% endif %}
+            {% if upgrade_e2e.validation_result == 'SKIP' %}
+            <div style="background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>Skipped:</strong> {{ upgrade_e2e.error_message or upgrade_e2e.note or 'No Y-1 → Y upgrade JUnit found yet.' }}
+            </div>
+            {% elif upgrade_e2e.validation_result == 'FAIL' %}
+            <div style="background-color: #f8d7da; border-left: 4px solid #721c24; padding: 15px; margin: 20px 0; border-radius: 5px;">
+                <strong>Failed:</strong> {{ upgrade_e2e.summary.failed_count or 0 }} failing test(s);
+                {{ upgrade_e2e.summary.degraded_operators or 0 }} degraded /
+                {{ upgrade_e2e.summary.unavailable_operators or 0 }} unavailable ClusterOperator(s).
+            </div>
+            {% endif %}
+            {% with topologies = upgrade_e2e.topologies %}
+            {% include '_topology_coverage.html.j2' %}
+            {% endwith %}
+            <table>
+                <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+                <tbody>
+                    <tr><td>Tests</td><td style="text-align: center;">{{ upgrade_e2e.summary.tests or 0 }}</td></tr>
+                    <tr><td>Failures</td><td style="text-align: center;">{{ upgrade_e2e.summary.failures or 0 }}</td></tr>
+                    <tr><td>Skipped tests</td><td style="text-align: center;">{{ upgrade_e2e.summary.skipped or 0 }}</td></tr>
+                    <tr><td>Degraded ClusterOperators</td><td style="text-align: center;">{{ upgrade_e2e.summary.degraded_operators or 0 }}</td></tr>
+                    <tr><td>Unavailable ClusterOperators</td><td style="text-align: center;">{{ upgrade_e2e.summary.unavailable_operators or 0 }}</td></tr>
+                </tbody>
+            </table>
+            {% for topo in upgrade_e2e.topologies %}
+            <h3>{{ topo.display_name or (topo.topology | topology_label) }}</h3>
+            {% if topo.status == 'SKIP' %}
+            <p><em>Skipped: {{ topo.skip_reason }}</em></p>
+            {% else %}
+            <p>
+                {{ topo.status }} | tests {{ topo.tests }} / failures {{ topo.failures }} / skipped {{ topo.skipped }}
+                {% if topo.source.gcs_url %}
+                | <a href="{{ topo.source.gcs_url }}">JUnit</a>
+                {% endif %}
+                {% if topo.source.job_name and topo.source.job_name != 'local' %}
+                | <code>{{ topo.source.job_name }}</code>
+                {% endif %}
+            </p>
+            {% if topo.duration.status == 'SKIP' %}
+            <p><em>Upgrade duration skipped: {{ topo.duration.skip_reason }}</em></p>
+            {% elif topo.duration.duration %}
+            <p>Upgrade duration: <code>{{ topo.duration.duration }}</code></p>
+            {% endif %}
+            {% if topo.pre_upgrade_operators.status == 'SKIP' %}
+            <p><em>Pre-upgrade ClusterOperators skipped: {{ topo.pre_upgrade_operators.skip_reason }}</em></p>
+            {% elif topo.pre_upgrade_operators.status == 'FAIL' %}
+            <p><strong>Pre-upgrade ClusterOperators failed.</strong></p>
+            {% elif topo.pre_upgrade_operators.cluster_version %}
+            <p>Pre-upgrade ClusterOperators passed at <code>{{ topo.pre_upgrade_operators.cluster_version }}</code>.</p>
+            {% endif %}
+            {% set changes = topo.pre_upgrade_operators.changes or {} %}
+            {% if changes.newly_degraded or changes.newly_unavailable %}
+            <p>CO status changes: newly degraded {{ changes.newly_degraded|join(', ') }}; newly unavailable {{ changes.newly_unavailable|join(', ') }}</p>
+            {% endif %}
+            {% if topo.post_upgrade_operators.status == 'SKIP' %}
+            <p><em>Post-upgrade ClusterOperators skipped: {{ topo.post_upgrade_operators.skip_reason }}</em></p>
+            {% elif topo.post_upgrade_operators.status == 'FAIL' %}
+            <p><strong>Post-upgrade ClusterOperators failed.</strong></p>
+            {% if topo.post_upgrade_operators.degraded %}
+            <p>Degraded: {% for name in topo.post_upgrade_operators.degraded %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+            {% endif %}
+            {% if topo.post_upgrade_operators.unavailable %}
+            <p>Unavailable: {% for name in topo.post_upgrade_operators.unavailable %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+            {% endif %}
+            {% elif topo.post_upgrade_operators.status == 'PASS' %}
+            <p>Post-upgrade ClusterOperators passed{% if topo.post_upgrade_operators.cluster_version %} at <code>{{ topo.post_upgrade_operators.cluster_version }}</code>{% endif %}.</p>
+            {% endif %}
+            {% if topo.failed_cases %}
+            <h4>Failed post-upgrade tests</h4>
             <ul>{% for case in topo.failed_cases %}<li><code>{{ case.name }}</code>{% if case.message %} — {{ case.message }}{% endif %}</li>{% endfor %}</ul>
             {% endif %}
             {% endif %}

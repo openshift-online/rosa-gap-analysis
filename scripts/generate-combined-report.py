@@ -150,6 +150,7 @@ def find_latest_reports(baseline, target, report_dir='reports'):
         'critical_alerts': None,
         'cluster_install': None,
         'e2e_validation': None,
+        'upgrade_e2e': None,
     }
 
     # Find AWS STS report
@@ -225,6 +226,11 @@ def find_latest_reports(baseline, target, report_dir='reports'):
     ev_files = sorted(glob.glob(ev_pattern))
     if ev_files:
         reports['e2e_validation'] = ev_files[-1]
+
+    ue_pattern = os.path.join(report_dir, f"gap-analysis-upgrade-e2e_{baseline_minor}_to_{target_minor}_*.json")
+    ue_files = sorted(glob.glob(ue_pattern))
+    if ue_files:
+        reports['upgrade_e2e'] = ue_files[-1]
 
     return reports
 
@@ -510,6 +516,43 @@ def main():
                 'alert_monitoring_pass': 0,
                 'alert_monitoring_fail': 0,
                 'alert_monitoring_skip': 0,
+            },
+            'topologies': [],
+            'error_message': err_msg,
+            'note': err_msg,
+        }
+
+    if reports['upgrade_e2e']:
+        with open(reports['upgrade_e2e'], 'r') as f:
+            report_data['upgrade_e2e'] = json.load(f)
+        log_info(f"Loaded Upgrade Validation report: {reports['upgrade_e2e']}")
+    else:
+        err_msg = get_status_msg(13, "Upgrade Validation skipped or no Y-1 upgrade JUnit found")
+        report_data['upgrade_e2e'] = {
+            'validation_result': fallback_validation_result(13),
+            'summary': {
+                'tests': 0,
+                'failures': 0,
+                'errors': 0,
+                'skipped': 0,
+                'failed_count': 0,
+                'degraded_operators': 0,
+                'unavailable_operators': 0,
+                'duration_skip': 0,
+                'pre_upgrade_skip': 0,
+                'post_upgrade_fail': 0,
+                'compared_topologies': [],
+                'skipped_topologies': ['hcp', 'classic'],
+                'compared_display_names': [],
+                'skipped_display_names': ['HCP hosted (data plane)', 'Classic'],
+                'failed_topologies': [],
+                'e2e_categories': {
+                    'workload': 0,
+                    'storage': 0,
+                    'network': 0,
+                    'managed_operator': 0,
+                    'other': 0,
+                },
             },
             'topologies': [],
             'error_message': err_msg,

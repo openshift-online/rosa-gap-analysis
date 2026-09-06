@@ -24,6 +24,7 @@ scripts/
 ├── gap-critical-alerts.py      # Critical Alerts Diff Validation
 ├── gap-cluster-install.py      # Cluster Install and Delete Validation
 ├── gap-e2e-validation.py       # Target E2E Validation and alert monitoring
+├── gap-upgrade-e2e.py          # Upgrade Validation from Y-1 to Y with E2E Tests
 ├── gap-feature-gates.py        # Feature gates analysis
 ├── gap-all.sh                  # Orchestrator
 ├── generate-combined-report.py # Combined report aggregator
@@ -39,6 +40,7 @@ scripts/
 │   ├── critical-alerts.html.j2
 │   ├── cluster-install.html.j2
 │   ├── e2e-validation.html.j2
+│   ├── upgrade-e2e.html.j2
 │   ├── feature-gates.html.j2
 │   ├── full-gap.html.j2
 │   └── ga-validation.html.j2
@@ -48,6 +50,7 @@ scripts/
     ├── reporters.py            # Report generation
     ├── ack_validation.py       # managed-cluster-config validation
     ├── marketplace.py          # AWS/GCP marketplace checks
+    ├── prow_artifacts.py       # Prow GCS snapshots, JUnit, and upgrade jobs
     ├── logging.sh              # Bash logging utilities
     └── openshift-releases.sh   # Bash version resolution
 ```

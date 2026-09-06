@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ type }} Report</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; max-width: 1200px; margin: 0 auto; padding: 20px; background-color: #f5f5f5; }
+        .container { background-color: white; padding: 30px; border-radius: 8px; }
+        h1 { color: #333; border-bottom: 3px solid #0066cc; padding-bottom: 10px; }
+        h2 { color: #444; margin-top: 30px; border-bottom: 2px solid #e0e0e0; padding-bottom: 8px; }
+        h3 { color: #555; margin-top: 20px; }
+        .metadata { background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #0066cc; color: white; font-weight: 600; }
+        code { background-color: #f4f4f4; padding: 2px 6px; border-radius: 3px; font-family: 'Courier New', monospace; }
+        .skip { background-color: #d1ecf1; border-left: 4px solid #0c5460; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .fail { background-color: #f8d7da; border-left: 4px solid #721c24; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .pass { background-color: #d4edda; border-left: 4px solid #155724; padding: 15px; margin: 20px 0; border-radius: 5px; }
+        .note { background-color: #f8f9fa; padding: 12px; border-radius: 5px; color: #555; font-size: 0.9em; }
+        .footer { margin-top: 40px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>{{ type }} Report</h1>
+        <div class="metadata">
+            <p><strong>Generated:</strong> {{ timestamp }}</p>
+            <p><strong>Baseline (Y-1):</strong> <code>{{ baseline }}</code></p>
+            <p><strong>Target (Y):</strong> <code>{{ target }}</code></p>
+            <p><strong>Source:</strong> rosa-e2e Y-1 → Y upgrade periodics (HCP, Classic STS, and OSD GCP)</p>
+            <p><strong>Result:</strong> {{ validation_result }}</p>
+        </div>
+        <p class="note">{{ note }}</p>
+        {% include '_topology_coverage.html.j2' %}
+
+        {% if validation_result == 'FAIL' %}
+        <div class="fail"><strong>Failed:</strong> post-upgrade e2e and/or ClusterOperator health reported failures.</div>
+        {% elif validation_result == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> no Y-1 → Y upgrade JUnit was available for the requested topologies.</div>
+        {% else %}
+        <div class="pass"><strong>Passed:</strong> post-upgrade e2e JUnit had no failing tests and no degraded/unavailable ClusterOperators. Missing duration or pre-upgrade COs are SKIP, not FAIL.</div>
+        {% endif %}
+
+        <h2>Summary</h2>
+        <table style="width: 70%;">
+            <thead><tr><th>Metric</th><th style="text-align: center;">Count</th></tr></thead>
+            <tbody>
+                <tr><td>Tests</td><td style="text-align: center;">{{ summary.tests }}</td></tr>
+                <tr><td>Failures</td><td style="text-align: center;">{{ summary.failures }}</td></tr>
+                <tr><td>Errors</td><td style="text-align: center;">{{ summary.errors }}</td></tr>
+                <tr><td>Skipped tests</td><td style="text-align: center;">{{ summary.skipped }}</td></tr>
+                <tr><td>Degraded ClusterOperators</td><td style="text-align: center;">{{ summary.degraded_operators }}</td></tr>
+                <tr><td>Unavailable ClusterOperators</td><td style="text-align: center;">{{ summary.unavailable_operators }}</td></tr>
+                <tr><td>Workload test failures</td><td style="text-align: center;">{{ summary.e2e_categories.workload }}</td></tr>
+                <tr><td>Storage test failures</td><td style="text-align: center;">{{ summary.e2e_categories.storage }}</td></tr>
+                <tr><td>Network test failures</td><td style="text-align: center;">{{ summary.e2e_categories.network }}</td></tr>
+                <tr><td>Managed operator test failures</td><td style="text-align: center;">{{ summary.e2e_categories.managed_operator }}</td></tr>
+            </tbody>
+        </table>
+
+        {% for topo in topologies %}
+        <h2>{{ topo.display_name or (topo.topology | topology_label) }}</h2>
+        {% if topo.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.skip_reason }}</div>
+        {% else %}
+        <p>
+            Status: <strong>{{ topo.status }}</strong>
+            | tests {{ topo.tests }} / failures {{ topo.failures }} / skipped {{ topo.skipped }}
+            {% if topo.source.gcs_url %}
+            | <a href="{{ topo.source.gcs_url }}">JUnit</a>
+            {% endif %}
+            {% if topo.source.job_name %}
+            | job <code>{{ topo.source.job_name }}</code> build <code>{{ topo.source.build_id }}</code>
+            {% endif %}
+        </p>
+
+        <h3>Upgrade duration</h3>
+        {% if topo.duration.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.duration.skip_reason }}</div>
+        {% else %}
+        <p>Duration: <code>{{ topo.duration.duration or 'present (see artifact)' }}</code>
+        {% if topo.duration.source_url %}
+        | <a href="{{ topo.duration.source_url }}">metrics</a>
+        {% endif %}
+        </p>
+        {% endif %}
+
+        <h3>Pre-upgrade ClusterOperators</h3>
+        {% if topo.pre_upgrade_operators.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.pre_upgrade_operators.skip_reason }}</div>
+        {% elif topo.pre_upgrade_operators.status == 'FAIL' %}
+        <div class="fail">
+            <strong>Failed:</strong> cluster was unhealthy before upgrade
+            (degraded {{ topo.pre_upgrade_operators.degraded|length }} /
+            unavailable {{ topo.pre_upgrade_operators.unavailable|length }}).
+        </div>
+        {% else %}
+        <div class="pass"><strong>Passed:</strong> ClusterOperators were healthy before upgrade{% if topo.pre_upgrade_operators.cluster_version %} at <code>{{ topo.pre_upgrade_operators.cluster_version }}</code>{% endif %}.</div>
+        {% endif %}
+        {% set changes = topo.pre_upgrade_operators.changes or {} %}
+        {% if changes.newly_degraded or changes.newly_unavailable or changes.recovered_degraded or changes.recovered_unavailable %}
+        <p>
+            CO status changes:
+            {% if changes.newly_degraded %}newly degraded {% for name in changes.newly_degraded %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+            {% if changes.newly_unavailable %}newly unavailable {% for name in changes.newly_unavailable %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+            {% if changes.recovered_degraded %}recovered degraded {% for name in changes.recovered_degraded %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+            {% if changes.recovered_unavailable %}recovered unavailable {% for name in changes.recovered_unavailable %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+        </p>
+        {% endif %}
+
+        <h3>Post-upgrade ClusterOperators</h3>
+        {% if topo.post_upgrade_operators.status == 'SKIP' %}
+        <div class="skip"><strong>Skipped:</strong> {{ topo.post_upgrade_operators.skip_reason }}</div>
+        {% elif topo.post_upgrade_operators.status == 'FAIL' %}
+        <div class="fail">
+            <strong>Failed:</strong>
+            degraded {{ topo.post_upgrade_operators.degraded|length }} /
+            unavailable {{ topo.post_upgrade_operators.unavailable|length }}
+        </div>
+        {% if topo.post_upgrade_operators.degraded %}
+        <p>Degraded: {% for name in topo.post_upgrade_operators.degraded %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+        {% endif %}
+        {% if topo.post_upgrade_operators.unavailable %}
+        <p>Unavailable: {% for name in topo.post_upgrade_operators.unavailable %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+        {% endif %}
+        {% else %}
+        <div class="pass"><strong>Passed:</strong> {{ topo.post_upgrade_operators.operator_count }} ClusterOperator(s) available and not degraded{% if topo.post_upgrade_operators.cluster_version %} at <code>{{ topo.post_upgrade_operators.cluster_version }}</code>{% endif %}.</div>
+        {% endif %}
+        {% if topo.post_upgrade_operators.notready_nodes %}
+        <p>NotReady nodes: {% for name in topo.post_upgrade_operators.notready_nodes %}<code>{{ name }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
+        {% endif %}
+
+        {% if topo.failed_cases %}
+        <h3>Failed post-upgrade e2e tests</h3>
+        <table>
+            <thead><tr><th>Test</th><th>Category</th><th>Message</th></tr></thead>
+            <tbody>
+            {% for case in topo.failed_cases %}
+                <tr>
+                    <td><code>{{ case.name }}</code></td>
+                    <td>{{ (case.categories or ['other']) | join(', ') }}</td>
+                    <td>{{ case.message }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+
+        <div class="footer">Generated by rosa-gap-analysis Check #13</div>
+    </div>
+</body>
+</html>

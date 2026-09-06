@@ -63,6 +63,11 @@ Automatically analyzes all of:
    - Target-version rosa-e2e JUnit (failed tests are reported; they do not fail the job)
    - Alert monitoring SKIP until VerifyNoCriticalAlerts exists in rosa-e2e
 
+7. **Upgrade Validation from Y-1 to Y with E2E Tests (Check #13)**
+   - Post-upgrade JUnit from rosa-e2e HCP, Classic, and OSD GCP Y-1 upgrade periodics
+   - Post-upgrade ClusterOperator health from JSON or oc-get txt dumps
+   - Duration from upgrade-metrics.json or finished.json; pre-upgrade COs when published
+
 The script runs all analyses and reports if differences exist in any area.
 
 ## Workflow
@@ -129,7 +134,7 @@ The script:
 - Generates JSON reports for each analysis (used for combined report)
 - Generates combined report aggregating all analyses (HTML, JSON)
 - Logs detected differences to stdout/stderr
-- Exits 1 if any validation check (CHECK #1-7 or #12) fails
+- Exits 1 if any validation check (CHECK #1-7, #12, or #13) fails
 - Exits 0 only when all validation checks pass
 - Also exits 1 on execution failures (missing tools, network errors, etc.)
 
@@ -142,6 +147,7 @@ The script:
 - `reports/gap-analysis-critical-alerts_*.json` (individual JSON only)
 - `reports/gap-analysis-cluster-install_*.json` (individual JSON only)
 - `reports/gap-analysis-e2e-validation_*.json` (individual JSON only)
+- `reports/gap-analysis-upgrade-e2e_*.json` (individual JSON only)
 - `reports/gap-analysis-full_*.{html,json}` (combined report with all analyses)
 
 **Use in CI/CD:**

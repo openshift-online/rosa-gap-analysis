@@ -4,7 +4,7 @@ OpenShift Gap Analysis Framework for comparing cloud credential policies and fea
 
 ## What It Does
 
-Identifies changes between OpenShift versions through 12 validation checks:
+Identifies changes between OpenShift versions through 13 validation checks:
 
 **Checks 1-2: AWS STS Validation**
 - **Check 1:** AWS STS Resources - Validates policy files in [managed-cluster-config](https://github.com/openshift/managed-cluster-config)
@@ -37,6 +37,9 @@ Identifies changes between OpenShift versions through 12 validation checks:
 
 **Check 12: Target E2E Validation and alert monitoring (Informational)**
 - **Check 12:** Target E2E Validation and alert monitoring - Consumes target-version rosa-e2e JUnit from HCP, Classic, and OSD GCP. Failed tests are reported as FAIL in the report and do not fail the job. Missing JUnit is SKIP. OSD GCP is skipped for OpenShift 5.x. Alert monitoring is SKIP until VerifyNoCriticalAlerts exists in rosa-e2e.
+
+**Check 13: Upgrade Validation from Y-1 to Y with E2E Tests**
+- **Check 13:** Upgrade Validation from Y-1 to Y with E2E Tests - Consumes rosa-e2e HCP, Classic, and OSD GCP Y-1 upgrade periodics. Failed post-upgrade e2e or unhealthy ClusterOperators FAIL. Duration comes from upgrade-metrics.json or finished.json. Missing JUnit is SKIP.
 
 ## How It Works
 

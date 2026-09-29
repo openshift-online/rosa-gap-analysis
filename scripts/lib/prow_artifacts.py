@@ -22,8 +22,13 @@ from common import fetch_url, is_version_5x, log_info, log_warning
 from openshift_releases import extract_minor_version, fetch_sippy_ga_dates, is_ga_minor_version
 
 PROW_HISTORY_URL = "https://prow.ci.openshift.org/job-history/gs/test-platform-results/logs"
-GCS_HTTP_BASE = "https://storage.googleapis.com/test-platform-results/logs"
-GCSWEB_BASE = "https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs"
+# Anonymous HTTPS can only read the public replica. OpenShift CI serves
+# world-readable logs from test-platform-results-public;
+# storage.googleapis.com/test-platform-results now returns HTTP 403, and
+# gcsweb-ci 301s the private path to gcs.ci.openshift.org which 404s.
+GCS_HTTP_BASE = "https://storage.googleapis.com/test-platform-results-public/logs"
+GCSWEB_BASE = "https://gcs.ci.openshift.org/gcs/test-platform-results-public/logs"
+ARTIFACT_HTTP_BASES = (GCS_HTTP_BASE, GCSWEB_BASE)
 JOB_PREFIX = "periodic-ci-openshift-online-rosa-e2e-main-periodics"
 UPGRADE_JOB_PREFIX = "periodic-ci-openshift-online-rosa-e2e-main-upgrade"
 UPGRADE_Y_MINUS_1 = "y-minus-1"
@@ -198,8 +203,8 @@ class _ArtifactMissing(Exception):
 def fetch_json_url(url):
     """Fetch JSON from URL. Returns None on HTML or retryable errors.
 
-    Raises _ArtifactMissing on HTTP 404 so callers skip the gcsweb mirror
-    for that object, then try the next artifact path.
+    Raises _ArtifactMissing on HTTP 404 so callers try the next HTTP base
+    or artifact path.
     """
     try:
         data = fetch_url(url, timeout=45)
@@ -220,8 +225,8 @@ def fetch_json_url(url):
 def fetch_text_url(url, xml=False):
     """Fetch a text/XML artifact. Returns None on HTML or retryable errors.
 
-    Raises _ArtifactMissing on HTTP 404 so callers skip the gcsweb mirror
-    for that object, then try the next artifact path.
+    Raises _ArtifactMissing on HTTP 404 so callers try the next HTTP base
+    or artifact path.
     """
     try:
         data = fetch_url(url, timeout=45)
@@ -288,7 +293,7 @@ def _artifact_rel_paths(job_name, build_id, as_name, filename, step_name):
 
 
 def snapshot_artifact_urls(job_name, build_id, as_name, filename, step_name):
-    """Return candidate URLs for a snapshot/JUnit file (GCS then gcsweb).
+    """Return candidate URLs for a snapshot/JUnit file (public GCS then gcs.ci).
 
     ci-operator uploads $ARTIFACT_DIR under
     artifacts/<test>/<step>/artifacts/<file>. Also try the step root for
@@ -296,32 +301,27 @@ def snapshot_artifact_urls(job_name, build_id, as_name, filename, step_name):
     """
     urls = []
     for rel in _artifact_rel_paths(job_name, build_id, as_name, filename, step_name):
-        urls.append(f"{GCS_HTTP_BASE}/{rel}")
-        urls.append(f"{GCSWEB_BASE}/{rel}")
+        for base in ARTIFACT_HTTP_BASES:
+            urls.append(f"{base}/{rel}")
     return urls
 
 
 def _load_artifact(job_name, build_id, as_name, filename, step_name, fetcher):
     """Fetch one artifact. Try nested then step-root path.
 
-    A GCS 404 means the gcsweb mirror of the same path cannot have the object,
-    so skip that mirror. Still try the other artifact path.
+    Try each public HTTP base. A 404 on one host still tries the next host
+    (public vs legacy paths can differ). After all hosts 404, try the other
+    artifact path.
     """
     for rel in _artifact_rel_paths(job_name, build_id, as_name, filename, step_name):
-        gcs_url = f"{GCS_HTTP_BASE}/{rel}"
-        try:
-            payload = fetcher(gcs_url)
-        except _ArtifactMissing:
-            continue
-        if payload is not None:
-            return payload, gcs_url
-        gcsweb_url = f"{GCSWEB_BASE}/{rel}"
-        try:
-            payload = fetcher(gcsweb_url)
-        except _ArtifactMissing:
-            continue
-        if payload is not None:
-            return payload, gcsweb_url
+        for base in ARTIFACT_HTTP_BASES:
+            url = f"{base}/{rel}"
+            try:
+                payload = fetcher(url)
+            except _ArtifactMissing:
+                continue
+            if payload is not None:
+                return payload, url
     return None, None
 
 

@@ -46,7 +46,7 @@ _curl_with_retry() {
             -o "$tmpfile" \
             "$url" 2>/dev/null) || true
 
-        body=$(<"$tmpfile" 2>/dev/null) || true
+        body=$(cat "$tmpfile" 2>/dev/null) || true
         rm -f "$tmpfile"
 
         # Success: 2xx status with non-empty body

@@ -211,6 +211,28 @@ def test_release_wrappers_preserve_terminal_failure(monkeypatch, clock, wrapper,
     assert clock.delays == ([5, 10, 20, 20] if failure in ('dns', 'timeout') else [])
 
 
+@pytest.mark.parametrize('wrapper,message', [
+    ('fetch_sippy_ga_dates', 'Failed to fetch GA dates from Sippy API'),
+    ('fetch_accepted_streams', 'Failed to fetch accepted release streams'),
+    ('get_latest_dev_nightly_version', 'Failed to fetch latest nightly version'),
+])
+def test_release_wrappers_log_exhausted_read_connection_reset(monkeypatch, clock, capsys, wrapper, message):
+    monkeypatch.setattr(openshift_releases, 'get_latest_ga_version', lambda: '4.21')
+    error = ConnectionResetError(errno.ECONNRESET, 'Connection reset by peer')
+    response = response_with(b'ignored')
+    response.__enter__.return_value.read.side_effect = error
+    opener = Mock(return_value=response)
+    monkeypatch.setattr(common, 'urlopen', opener)
+    with pytest.raises(SystemExit) as caught:
+        getattr(openshift_releases, wrapper)()
+    assert caught.value.code == 1
+    assert opener.call_count == 5
+    assert response.__enter__.return_value.read.call_count == 5
+    assert response.__exit__.call_count == 5
+    assert clock.delays == [5, 10, 20, 20]
+    assert f'[ERROR]{common.Colors.RESET} {message}: {error}' in capsys.readouterr().err
+
+
 def test_missing_nightly_name_is_not_retried(monkeypatch, clock):
     monkeypatch.setattr(openshift_releases, 'get_latest_ga_version', lambda: '4.21')
     opener = Mock(return_value=response_with(b'{}'))

@@ -19,7 +19,7 @@ def fetch_sippy_ga_dates():
     """Fetch GA dates from Sippy API."""
     try:
         return json.loads(fetch_url(SIPPY_API, timeout=10)).get('ga_dates', {})
-    except (URLError, TimeoutError, json.JSONDecodeError) as e:
+    except (URLError, OSError, json.JSONDecodeError) as e:
         log_error(f"Failed to fetch GA dates from Sippy API: {e}")
         sys.exit(1)
 
@@ -52,7 +52,7 @@ def fetch_accepted_streams():
     """
     try:
         return json.loads(fetch_url(ACCEPTED_STREAMS_API, timeout=10))
-    except (URLError, TimeoutError, json.JSONDecodeError) as e:
+    except (URLError, OSError, json.JSONDecodeError) as e:
         log_error(f"Failed to fetch accepted release streams: {e}")
         sys.exit(1)
 
@@ -153,7 +153,7 @@ def get_latest_dev_nightly_version():
             log_error(f"No nightly version found for {dev_version}")
             sys.exit(1)
         return nightly_name
-    except (URLError, TimeoutError, json.JSONDecodeError, KeyError) as e:
+    except (URLError, OSError, json.JSONDecodeError, KeyError) as e:
         log_error(f"Failed to fetch latest nightly version: {e}")
         sys.exit(1)
 

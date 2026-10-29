@@ -1,0 +1,19 @@
+{
+	"path": "rosa/gap-analysis/ocp-gate-ack/rosa-gap-analysis-ocp-gate-ack-ref.yaml",
+	"owners": {
+		"approvers": [
+			"tiwillia",
+			"dustman9000",
+			"bmeng",
+			"ravitri",
+			"rbhilare"
+		],
+		"reviewers": [
+			"tiwillia",
+			"dustman9000",
+			"bmeng",
+			"ravitri",
+			"rbhilare"
+		]
+	}
+}

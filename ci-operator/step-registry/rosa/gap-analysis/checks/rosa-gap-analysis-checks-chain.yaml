@@ -1,0 +1,25 @@
+chain:
+  as: rosa-gap-analysis-checks
+  steps:
+  - ref: rosa-gap-analysis-aws-sts
+  - ref: rosa-gap-analysis-gcp-wif
+  - ref: rosa-gap-analysis-ocp-gate-ack
+  - ref: rosa-gap-analysis-versions-channels
+  - ref: rosa-gap-analysis-ocm-version-gate
+  - ref: rosa-gap-analysis-api-resources
+  - ref: rosa-gap-analysis-critical-alerts-diff
+  - ref: rosa-gap-analysis-cluster-install
+  - ref: rosa-gap-analysis-e2e-validation
+  - ref: rosa-gap-analysis-upgrade-e2e
+  - ref: rosa-gap-analysis-feature-gates
+  documentation: |-
+    Reusable bundle of all rosa-gap-analysis checks in the same order as the
+    gap-all.sh job (global checks 1-7, then 9-13, with Feature Gates
+    #8 last). Each entry is an independent ref, so consumers can drop this chain
+    into any workflow or inline the refs to add, remove, or reorder checks.
+    Standard checks (aws-sts, gcp-wif, ocp-gate-ack, versions-channels,
+    ocm-version-gate, upgrade-e2e) fail the step on validation FAIL; the rest are
+    informational (exit 0 on findings, SKIP on missing Prow snapshots/JUnit).
+    Checks 9-13 read Prow GCS snapshots/JUnit (no cluster provisioning). Pair with
+    rosa-gap-analysis-setup / -ocm-auth / -resolve-versions (pre) and
+    rosa-gap-analysis-report / -cleanup (post).

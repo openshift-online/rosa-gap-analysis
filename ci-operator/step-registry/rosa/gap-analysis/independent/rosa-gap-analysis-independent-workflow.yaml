@@ -1,0 +1,27 @@
+workflow:
+  as: rosa-gap-analysis-independent
+  steps:
+    env:
+      OPENSHIFT_VERSION: ""
+      OCM_LOGIN_ENV: "staging"
+    pre:
+    - ref: rosa-gap-analysis-setup
+    - ref: rosa-gap-analysis-ocm-auth
+    - ref: rosa-gap-analysis-resolve-versions
+    test:
+    - chain: rosa-gap-analysis-checks
+    post:
+    - ref: rosa-gap-analysis-cleanup
+  documentation: |-
+    Independent-steps gap-analysis (workflow 2 of 3): runs each check as an
+    independent step; every check produces its OWN per-check report (HTML+JSON) in
+    ${ARTIFACT_DIR}. There is no combined-report aggregation step - the per-check
+    reports are the deliverable, so a report is generated independently for each
+    check. No cluster provisioning.
+      pre:  setup -> ocm-auth -> resolve-versions
+      test: rosa-gap-analysis-checks chain (each ref self-reports)
+      post: cleanup
+    Add, remove, or reorder checks by inlining the refs from the
+    rosa-gap-analysis-checks chain into `test`, or run any single check ref on its
+    own. The rosa-gap-analysis-report step can still be run afterward against any
+    subset of per-check reports if an aggregate is also wanted.

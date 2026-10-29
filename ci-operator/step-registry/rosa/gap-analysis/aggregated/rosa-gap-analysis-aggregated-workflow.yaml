@@ -1,0 +1,24 @@
+workflow:
+  as: rosa-gap-analysis-aggregated
+  steps:
+    env:
+      OPENSHIFT_VERSION: ""
+      OCM_LOGIN_ENV: "staging"
+    pre:
+    - ref: rosa-gap-analysis-setup
+    - ref: rosa-gap-analysis-ocm-auth
+    - ref: rosa-gap-analysis-resolve-versions
+    test:
+    - chain: rosa-gap-analysis-checks
+    post:
+    - ref: rosa-gap-analysis-report
+    - ref: rosa-gap-analysis-cleanup
+  documentation: |-
+    Aggregated gap-analysis (workflow 1 of 3): runs all gap-all.sh checks (global
+    checks 1-13, feature-gates last) and produces a single combined report. No
+    cluster provisioning. Each check also emits its own per-check report, and the
+    report step aggregates them into the combined HTML/JSON.
+      pre:  setup -> ocm-auth -> resolve-versions
+      test: rosa-gap-analysis-checks chain
+      post: report (combined) -> cleanup
+    Set OPENSHIFT_VERSION (e.g. 4.22 or 5.0) or override BASELINE/TARGET.

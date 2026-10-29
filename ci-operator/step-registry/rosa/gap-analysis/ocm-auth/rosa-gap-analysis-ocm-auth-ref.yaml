@@ -1,0 +1,22 @@
+ref:
+  as: rosa-gap-analysis-ocm-auth
+  from: gap-analysis
+  grace_period: 1m
+  timeout: 10m
+  commands: rosa-gap-analysis-ocm-auth-commands.sh
+  resources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+  env:
+  - name: OCM_LOGIN_ENV
+    default: "staging"
+    documentation: OCM environment to validate the token against (staging, production, integration).
+  documentation: |-
+    OCM authentication and token validation. Reads the OCM offline token from
+    ${CLUSTER_PROFILE_DIR}/ocm-token, validates it by logging in to OCM_LOGIN_ENV,
+    and (on success) stages the token at ${SHARED_DIR}/ocm-token so the downstream
+    check steps can reuse it (each ci-operator step runs in its own pod, so the
+    login session itself cannot be shared - only the token). Graceful no-op when no
+    token is present: downstream OCM/ROSA-backed checks then degrade gracefully.
+    Intended as a pre step. Requires the gap-analysis image (ocm CLI).

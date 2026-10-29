@@ -205,6 +205,12 @@ from reporters import generate_html_report, generate_json_report
 
 ## CI/CD Integration
 
+**Step registry (`ci-operator/step-registry/rosa/gap-analysis/`):**
+- ci-operator step-registry implementation of the gap-analysis job (openshift/release layout, destined upstream). See [docs/step-registry-workflow.md](docs/step-registry-workflow.md)
+- **Refs**: 5 lifecycle (`setup`, `ocm-auth`, `resolve-versions`, `report`, `cleanup`) + 11 check refs (one per gap-all.sh check; `critical-alerts-diff` renamed to avoid colliding with the upstream capture ref) + `ga-validation` (GA readiness — **individual-only, not in any workflow/chain**; GA readiness stays standalone/manual, not CI)
+- **Chain** `rosa-gap-analysis-checks` (all 11 checks, feature-gates last). **2 workflows**: `rosa-gap-analysis-aggregated` (checks + combined report), `rosa-gap-analysis-independent` (per-check reports, no aggregation)
+- Each check ref self-reports; state via `${SHARED_DIR}` (`gap-versions.env`, `ocm-token`), artifacts via `${ARTIFACT_DIR}`; refs use `from: gap-analysis` (the ci/Containerfile image). Validate with openshift/release `make validate-step-registry` (ci-operator-configresolver `--validate-only`)
+
 **Container (ci/Containerfile):**
 - Base: UBI9
 - Includes: `oc` CLI, Python 3, PyYAML, Jinja2, `jq`, `yq`, `gh`, curl, git, make, bash

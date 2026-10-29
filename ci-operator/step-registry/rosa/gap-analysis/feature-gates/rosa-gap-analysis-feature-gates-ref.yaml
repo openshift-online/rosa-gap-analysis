@@ -1,0 +1,27 @@
+ref:
+  as: rosa-gap-analysis-feature-gates
+  from: gap-analysis
+  grace_period: 1m
+  timeout: 15m
+  commands: rosa-gap-analysis-feature-gates-commands.sh
+  resources:
+    requests:
+      cpu: 100m
+      memory: 300Mi
+  env:
+  - name: OPENSHIFT_VERSION
+    default: ""
+    documentation: Single version to analyze (auto-resolves BASELINE/TARGET). Optional if rosa-gap-analysis-resolve-versions ran first.
+  - name: BASELINE
+    default: ""
+    documentation: Explicit baseline version (used with TARGET).
+  - name: TARGET
+    default: ""
+    documentation: Explicit target version (used with BASELINE).
+  - name: OCM_LOGIN_ENV
+    default: "staging"
+    documentation: OCM environment for login; OCM/ROSA-backed data degrades gracefully if unavailable.
+  documentation: |-
+    Runs gap-feature-gates.py (Check #8: feature gate changes, informational). Exits 0 on findings; must run last. Reads resolved versions from ${SHARED_DIR}/gap-versions.env (or env),
+    writes its report into ${SHARED_DIR}/gap-analysis-reports and ${ARTIFACT_DIR}.
+    Requires the gap-analysis image (python3 + scripts/gap-*.py).

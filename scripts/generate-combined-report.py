@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent / 'lib'))
 from reporters import generate_html_report, generate_json_report
 from common import log_info, log_success
 from openshift_releases import extract_minor_version, get_next_minor_version
+from report_links import build_log_location
 
 
 def parse_build_log(log_path):
@@ -32,13 +33,7 @@ def parse_build_log(log_path):
     if not log_path or not os.path.exists(log_path):
         return metrics
 
-   # Determine build log URL
-    job = os.environ.get('job') or os.environ.get('JOB_NAME')
-    buildid = os.environ.get('buildid') or os.environ.get('BUILD_ID')
-    if job and buildid:
-        metrics['build_log_url'] = f"https://prow.ci.openshift.org/view/gs/test-platform-results/logs/{job}/{buildid}/build-log.txt"
-    else:
-        metrics['build_log_url'] = f"file://{os.path.abspath(log_path)}"
+    metrics['build_log_url'] = build_log_location(log_path)
 
     try:
         with open(log_path, 'r', encoding='utf-8', errors='ignore') as f:

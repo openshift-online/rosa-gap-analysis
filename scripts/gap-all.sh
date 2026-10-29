@@ -865,14 +865,6 @@ EOF
     echo "GAP ANALYSIS SUMMARY"
     echo "==============================================================================="
 
-    # Job information (if running in CI)
-    if [[ -z "${job:-}" ]]; then
-        job="job123"
-    fi
-    if [[ -z "${buildid:-}" ]]; then
-        buildid="build1234"
-    fi
-
     echo "Baseline: ${BASELINE}"
     echo "Target: ${TARGET}"
     echo "Started: ${START_TIME_FORMATTED}"
@@ -921,17 +913,20 @@ EOF
 
     # List HTML reports if they exist
     local html_reports=$(find "${REPORT_DIR}" -maxdepth 1 -name "*.html" -type f 2>/dev/null | sort)
-    if [[ -n "$html_reports" && -n "$job" && -n "$buildid" ]]; then
+    if [[ -n "$html_reports" ]]; then
         echo "- HTML reports:"
         while IFS= read -r report; do
-            local basename=$(basename "$report")
-            echo "  • https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/${job}/${buildid}/artifacts/test/artifacts/rosa-gap-analysis-reports/${basename}"
+            local location
+            location=$(python3 "${SCRIPT_DIR}/lib/report_links.py" "$report") || location="$report"
+            echo "  • ${location}"
         done <<< "$html_reports"
     fi
 
     # Add build log if available
-    if [[  -n "$job" && -n "$buildid" ]]; then
-        echo "- Build log: https://prow.ci.openshift.org/view/gs/test-platform-results/logs/${job}/${buildid}/build-log.txt"
+    if [[ -n "${BUILD_LOG:-}" && -f "$BUILD_LOG" ]]; then
+        local log_location
+        log_location=$(python3 "${SCRIPT_DIR}/lib/report_links.py" "$BUILD_LOG") || log_location="$BUILD_LOG"
+        echo "- Build log: ${log_location}"
     fi
 
     echo "==============================================================================="

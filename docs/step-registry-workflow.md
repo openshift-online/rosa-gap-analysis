@@ -16,6 +16,32 @@ a standalone step run manually/individually by SREs (see
 Source lives at `ci-operator/step-registry/rosa/gap-analysis/` (mirror of the
 openshift/release layout, to be contributed upstream).
 
+## `gap-all.sh` and nightlies
+
+Nightly periodics keep running **`scripts/gap-all.sh`** (Prow is unchanged). To avoid
+two copies of the check logic, `gap-all.sh` no longer calls the `gap-*.py` analyzers
+directly — it is the single-pod runner that **delegates to the same step-registry
+`commands.sh`** defined here. `commands.sh` → `gap-*.py` is therefore the one source of
+truth for every check, shared by both the nightly (`gap-all.sh`) and the ci-operator
+workflows.
+
+`gap-all.sh` keeps the behavior nightlies depend on and delegates only the checks:
+
+- **Stays in `gap-all.sh`:** argument parsing, `--steps`, `--dry-run`; version resolution
+  (including `BASE_VERSION`/`TARGET_VERSION` and the `NIGHTLY`/`CANDIDATE` keywords, which
+  the `resolve-versions` ref does not understand) — after resolving it writes
+  `${SHARED_DIR}/gap-versions.env` in the same format the checks source; OCM login via
+  `ocm_authenticate` (an in-container login the check scripts inherit, rather than the
+  `ocm-auth` ref's token file); the combined report; the final summary; and the exit code.
+- **Delegated:** each check runs its `<check>/*-commands.sh` (via `REGISTRY_DIR` + the
+  `run_all_steps` method), in the same static order as the `rosa-gap-analysis-checks`
+  chain, feature-gates last. It runs every selected check even after a standard check
+  fails, then exits 1 if any standard check failed.
+- GA readiness stays out (it is not in the chain).
+
+This stays one Prow step with one log. Separate pods per check only happen when
+openshift/release runs the `rosa-gap-analysis-aggregated` workflow itself.
+
 ## Why a step registry
 
 - **Debuggability** — each check is its own ci-operator step with its own pod,
@@ -169,6 +195,12 @@ repo's `ci/Containerfile`. The consuming ci-operator config must make that image
 available (e.g. via `base_images`/`images`). Wiring a ci-operator config/job that
 uses one of the workflows (`rosa-gap-analysis-aggregated` / `-independent`) is
 tracked separately.
+
+Because nightlies run `gap-all.sh`, which delegates to the check `commands.sh`
+(see [`gap-all.sh` and nightlies](#gap-allsh-and-nightlies)), the image must ship the
+step registry (`ci-operator/`) in addition to `scripts/`. The `commands.sh` default
+`GAP_SCRIPTS_DIR` to `/gap-analysis/scripts`; `gap-all.sh` locates the registry via
+`REGISTRY_DIR` (default `${PROJECT_ROOT}/ci-operator/step-registry/rosa/gap-analysis`).
 
 ## Capture vs analysis
 

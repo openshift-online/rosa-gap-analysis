@@ -13,7 +13,7 @@ workflow:
     post:
     - ref: rosa-gap-analysis-cleanup
   documentation: |-
-    Independent-steps gap-analysis (workflow 2 of 3): runs each check as an
+    Independent-steps gap-analysis (workflow 2 of 2): runs each check as an
     independent step; every check produces its OWN per-check report (HTML+JSON) in
     ${ARTIFACT_DIR}. There is no combined-report aggregation step - the per-check
     reports are the deliverable, so a report is generated independently for each

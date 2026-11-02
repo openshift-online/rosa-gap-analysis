@@ -79,30 +79,56 @@ for script in "${help_scripts[@]}"; do
     fi
 done
 
-echo "==> gap-all.sh orchestrates every gap-*.py and runs feature-gates last"
-mapfile -t gap_scripts < <(find scripts -maxdepth 1 -name 'gap-*.py' -type f -printf '%f\n' | sort)
-mapfile -t orchestrated < <(grep -E 'python3 "\$\{SCRIPT_DIR\}/gap-[a-z0-9-]+\.py"' scripts/gap-all.sh \
-    | grep -oE 'gap-[a-z0-9-]+\.py' || true)
+echo "==> gap-all.sh delegates to step-registry commands.sh; every gap-*.py is wired; feature-gates last"
+REGISTRY="ci-operator/step-registry/rosa/gap-analysis"
 
-if [[ ${#orchestrated[@]} -eq 0 ]]; then
-    fail "No python3 gap-*.py invocations found in scripts/gap-all.sh"
-else
-    last="${orchestrated[-1]}"
-    if [[ "${last}" != "gap-feature-gates.py" ]]; then
-        fail "Feature gates must run last in gap-all.sh (last invocation is ${last})"
-    fi
+# gap-all.sh must delegate to the step-registry (single source of check logic),
+# not call the gap-*.py scripts directly.
+if grep -qE 'python3 "\$\{SCRIPT_DIR\}/gap-[a-z0-9-]+\.py"' scripts/gap-all.sh; then
+    fail "scripts/gap-all.sh still calls gap-*.py directly; it must delegate to step-registry commands.sh"
+fi
+if ! grep -q 'run_all_steps' scripts/gap-all.sh; then
+    fail "scripts/gap-all.sh is missing run_all_steps (step delegation)"
 fi
 
-declare -A orchestrated_set=()
-for name in "${orchestrated[@]}"; do
-    orchestrated_set["${name}"]=1
-done
-
+# Every scripts/gap-*.py must be invoked by a step-registry check commands.sh.
+mapfile -t gap_scripts < <(find scripts -maxdepth 1 -name 'gap-*.py' -type f -exec basename {} \; | sort)
+if [[ ${#gap_scripts[@]} -eq 0 ]]; then
+    fail "No scripts/gap-*.py found"
+fi
 for name in "${gap_scripts[@]}"; do
-    if [[ -z "${orchestrated_set[${name}]+x}" ]]; then
-        fail "${name} is not invoked from scripts/gap-all.sh"
+    hits=$(grep -rlF "${name}" "${REGISTRY}" 2>/dev/null | grep -c 'commands\.sh' || true)
+    if [[ "${hits}" -eq 0 ]]; then
+        fail "${name} is not invoked by any step-registry commands.sh"
     fi
 done
+
+# Feature gates must run last in gap-all.sh's ordered_steps array.
+ga_last=$(awk '
+    /local ordered_steps=\(/ {cap=1}
+    cap {
+        line=$0
+        sub(/.*ordered_steps=\(/, "", line)
+        sub(/\).*/, "", line)
+        buf = buf " " line
+        if ($0 ~ /\)/) cap=0
+    }
+    END {
+        n = split(buf, a, /[ \t]+/)
+        for (i=n; i>=1; i--) if (a[i] != "") { print a[i]; break }
+    }
+' scripts/gap-all.sh)
+if [[ "${ga_last}" != "feature-gates" ]]; then
+    fail "Feature gates must be last in gap-all.sh ordered_steps (last is '${ga_last}')"
+fi
+
+# Feature gates must also be last in the checks chain consumed by ci-operator.
+chain="${REGISTRY}/checks/rosa-gap-analysis-checks-chain.yaml"
+chain_last=$(grep -E '^[[:space:]]*-[[:space:]]*ref:' "${chain}" 2>/dev/null \
+    | tail -1 | grep -oE 'rosa-gap-analysis-[a-z0-9-]+' || true)
+if [[ "${chain_last}" != "rosa-gap-analysis-feature-gates" ]]; then
+    fail "Feature gates must be last in the checks chain (last is '${chain_last}')"
+fi
 
 if [[ "${FAILED}" -ne 0 ]]; then
     echo "verify FAILED" >&2

@@ -14,7 +14,7 @@ workflow:
     - ref: rosa-gap-analysis-report
     - ref: rosa-gap-analysis-cleanup
   documentation: |-
-    Aggregated gap-analysis (workflow 1 of 3): runs all gap-all.sh checks (global
+    Aggregated gap-analysis (workflow 1 of 2): runs all gap-all.sh checks (global
     checks 1-13, feature-gates last) and produces a single combined report. No
     cluster provisioning. Each check also emits its own per-check report, and the
     report step aggregates them into the combined HTML/JSON.

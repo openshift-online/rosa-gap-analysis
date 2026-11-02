@@ -43,7 +43,7 @@ Claude follows an impact-based approach in this repository:
 
 **3-Layer Design:**
 1. Individual analyzers (`scripts/gap-*.py`) - AWS STS, GCP WIF, OCP Admin Gates, Versions & Channels, OCM Version Gate, API Resources and CRD, Critical Alerts, Cluster Install, Target E2E Validation, Upgrade Validation from Y-1 to Y with E2E Tests, Feature Gates
-2. Orchestrator (`scripts/gap-all.sh`) - Runs all analyzers, generates combined reports
+2. Orchestrator (`scripts/gap-all.sh`) - Nightly runner; delegates each check to its step-registry `commands.sh` (single source of check logic), generates combined reports
 3. Shared libraries (`scripts/lib/`, `ci/lib/`) - Version resolution, validation, reporting, CI utilities
 
 **Data Sources:**
@@ -153,6 +153,7 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 ## Critical Implementation Details
 
 **gap-all.sh orchestrator:**
+- **Nightly runner that delegates to the step registry**: runs each check via its `ci-operator/step-registry/rosa/gap-analysis/<check>/*-commands.sh` (through `REGISTRY_DIR` + the `run_all_steps` method) instead of calling `gap-*.py` directly, so `commands.sh` → `gap-*.py` is the single source of check logic shared with the ci-operator workflows. Keeps version resolution (incl. `BASE_VERSION`/`TARGET_VERSION`/`NIGHTLY`/`CANDIDATE`), `--steps`, `--dry-run`, OCM login (`ocm_authenticate`, in-container), combined report, summary, and exit logic; writes `${SHARED_DIR}/gap-versions.env` for the checks to source. Runs all selected checks even after a standard FAIL. GA readiness stays out (not in the chain). Prow is unchanged — nightlies still invoke `gap-all.sh`.
 - Sets `GAP_FULL_REPORT=1` to skip individual HTML (generates JSON only)
 - Feature gates runs last, aggregates reports via `generate-combined-report.py`, exits 1 on failures
 
@@ -214,7 +215,7 @@ from reporters import generate_html_report, generate_json_report
 **Container (ci/Containerfile):**
 - Base: UBI9
 - Includes: `oc` CLI, Python 3, PyYAML, Jinja2, `jq`, `yq`, `gh`, curl, git, make, bash
-- Scripts pre-installed at `/gap-analysis/scripts/` and in PATH
+- Scripts pre-installed at `/gap-analysis/scripts/` and in PATH; the image must also include the step registry (`/gap-analysis/ci-operator/`) so `gap-all.sh` can delegate to the check `commands.sh`
 - Writable temp dirs (`/tmp/.cache`, `/tmp/gap-analysis-data`) for random UID support
 - Working directory: `/gap-analysis`
 

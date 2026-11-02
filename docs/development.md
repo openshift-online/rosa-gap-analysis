@@ -60,7 +60,7 @@ scripts/
 
 ```bash
 make test                    # pytest (tests/)
-make lint                    # Python compile, ruff, shellcheck, Jinja2, orchestrator
+make lint                    # Python compile, ruff, shellcheck, Jinja2, gap-all.sh delegation
 pre-commit run --all-files   # make lint plus whitespace/YAML/gitleaks
 ```
 

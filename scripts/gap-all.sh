@@ -332,11 +332,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
     exit 0
 fi
 
-# Build flags for gap scripts
-VERBOSE_FLAG=""
-if [[ "$VERBOSE" == "true" ]]; then
-    VERBOSE_FLAG="--verbose"
-fi
+# --verbose is propagated to the check commands.sh via GAP_VERBOSE,
+# exported in setup_step_environment (the commands.sh add --verbose when set).
 
 
 main() {
@@ -634,6 +631,12 @@ EOF
     # already read them.
     setup_step_environment() {
         export GAP_SCRIPTS_DIR="$SCRIPT_DIR"
+
+        # Propagate --verbose to the check commands.sh (they add --verbose to
+        # their gap-*.py call when GAP_VERBOSE=1).
+        if [[ "$VERBOSE" == "true" ]]; then
+            export GAP_VERBOSE=1
+        fi
 
         local report_dir_abs
         report_dir_abs="$(cd "$REPORT_DIR" && pwd)"

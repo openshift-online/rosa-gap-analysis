@@ -92,6 +92,11 @@ WORKDIR /gap-analysis
 # Copy gap analysis scripts into the image (preserves permissions)
 COPY scripts/ /gap-analysis/scripts/
 
+# Copy the ci-operator step registry so gap-all.sh can delegate to each check's
+# commands.sh when the image runs standalone (e.g. `podman run ... gap-all.sh`).
+# CI jobs also receive these via the `from: src` full-repo checkout.
+COPY ci-operator/ /gap-analysis/ci-operator/
+
 # Add scripts to PATH for convenience
 ENV PATH="/gap-analysis/scripts:/gap-analysis/scripts/lib:${PATH}"
 

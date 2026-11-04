@@ -52,6 +52,12 @@ else
   exit 1
 fi
 
+# Optional verbose passthrough: GAP_VERBOSE=1 (set by gap-all.sh --verbose or a
+# workflow's env) adds --verbose to the analyzer invocation below.
+if [[ "${GAP_VERBOSE:-0}" == "1" ]]; then
+  version_args+=(--verbose)
+fi
+
 log "Running gap-cluster-install.py ${version_args[*]}"
 rc=0
 python3 "${GAP_SCRIPTS_DIR}/gap-cluster-install.py" "${version_args[@]}" --report-dir "${REPORTS_DIR}" || rc=$?

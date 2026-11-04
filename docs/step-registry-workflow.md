@@ -127,6 +127,7 @@ through `${SHARED_DIR}`; artifacts go to `${ARTIFACT_DIR}`.
 | `${ARTIFACT_DIR}` | every step | CI | per-step artifacts + per-step logs |
 | `OPENSHIFT_VERSION` / `BASELINE` / `TARGET` | job env | resolve-versions, checks | version inputs (precedence: OPENSHIFT_VERSION > BASELINE+TARGET > auto-detect) |
 | `OCM_LOGIN_ENV` | job env | ocm-auth, checks | OCM environment (default `staging`) |
+| `GAP_VERBOSE` | job env / `gap-all.sh --verbose` | checks | `1` = pass `--verbose` to the analyzer (extra console detail) |
 
 **Exit semantics** map to ci-operator per-step: standard checks exit non-zero on
 validation FAIL (failing the step/job); informational checks exit 0 on findings
@@ -196,11 +197,13 @@ available (e.g. via `base_images`/`images`). Wiring a ci-operator config/job tha
 uses one of the workflows (`rosa-gap-analysis-aggregated` / `-independent`) is
 tracked separately.
 
-Because nightlies run `gap-all.sh`, which delegates to the check `commands.sh`
-(see [`gap-all.sh` and nightlies](#gap-allsh-and-nightlies)), the image must ship the
-step registry (`ci-operator/`) in addition to `scripts/`. The `commands.sh` default
-`GAP_SCRIPTS_DIR` to `/gap-analysis/scripts`; `gap-all.sh` locates the registry via
-`REGISTRY_DIR` (default `${PROJECT_ROOT}/ci-operator/step-registry/rosa/gap-analysis`).
+In CI, the job checks out the full repo (`from: src`), so `gap-all.sh` and the check
+`commands.sh` are available there regardless. `ci/Containerfile` **also** copies
+`ci-operator/` into the image so running the image standalone (e.g. `podman run …
+gap-all.sh …`, see [`gap-all.sh` and nightlies](#gap-allsh-and-nightlies)) works too.
+The `commands.sh` default `GAP_SCRIPTS_DIR` to `/gap-analysis/scripts`; `gap-all.sh`
+locates the registry via `REGISTRY_DIR` (default
+`${PROJECT_ROOT}/ci-operator/step-registry/rosa/gap-analysis`).
 
 ## Capture vs analysis
 

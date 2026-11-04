@@ -215,7 +215,7 @@ from reporters import generate_html_report, generate_json_report
 **Container (ci/Containerfile):**
 - Base: UBI9
 - Includes: `oc` CLI, Python 3, PyYAML, Jinja2, `jq`, `yq`, `gh`, curl, git, make, bash
-- Scripts pre-installed at `/gap-analysis/scripts/` and in PATH; the image must also include the step registry (`/gap-analysis/ci-operator/`) so `gap-all.sh` can delegate to the check `commands.sh`
+- Scripts + step registry copied in (`/gap-analysis/scripts/` + `/gap-analysis/ci-operator/`), scripts in PATH; `gap-all.sh` delegates to the check `commands.sh` via `REGISTRY_DIR` (CI jobs also get them from the `from: src` checkout)
 - Writable temp dirs (`/tmp/.cache`, `/tmp/gap-analysis-data`) for random UID support
 - Working directory: `/gap-analysis`
 

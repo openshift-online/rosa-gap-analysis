@@ -157,7 +157,8 @@ export GH_TOKEN="..." && ./ci/prow-autofix.sh
 - Feature gates runs last, aggregates reports via `generate-combined-report.py`, exits 1 on failures
 
 **Version resolution (openshift_releases.py/sh):**
-- **API endpoint**: Uses `/api/v1/releasestreams/accepted` (single call for both 4-stable and 4-dev-preview)
+- **API endpoint**: Uses `/api/v1/releasestreams/accepted` (single call returning every accepted stream)
+- **Per-major streams**: Stable/dev-preview streams are published per **major** version (`4-stable`/`4-dev-preview`, `5-stable`/`5-dev-preview`). Resolvers must derive the stream from the version being resolved via `stable_stream_for_version()` / `dev_preview_stream_for_version()` (both `openshift_releases.py` and `openshift-releases.sh`); never hardcode `4-stable`. `X-stable` also carries that major's RC builds, so stable/z-stream lookups exclude `-rc.`/`-ec.`
 - **Single version resolution (RECOMMENDED)**: `--version` flag or `OPENSHIFT_VERSION` env var auto-resolves baseline and target:
   - **Baseline precedence**: stable > candidate (RC/EC) > CI > nightly
   - **Target precedence**: candidate (RC/EC) > CI > nightly

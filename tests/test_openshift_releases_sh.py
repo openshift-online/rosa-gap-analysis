@@ -7,6 +7,7 @@ bash with the accepted-streams cache pre-seeded from a fixture, so no API is
 contacted.
 """
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -52,6 +53,43 @@ _ACCEPTED_STREAMS_CACHE="$(cat)"
         text=True,
         check=False,
     )
+    return proc.returncode, proc.stdout.strip(), proc.stderr
+
+
+# Minimal release-stream tag payloads, keyed by the stream the URL asks for.
+# `5-stable` deliberately lists the RC first so a missing RC filter is visible.
+_TAG_PAYLOADS = {
+    "4-stable": '{"tags":[{"name":"4.22.21","pullSpec":"ps-4.22.21"}]}',
+    "5-stable": '{"tags":[{"name":"5.0.0-rc.8","pullSpec":"ps-rc8"},'
+                '{"name":"5.0.1","pullSpec":"ps-5.0.1"}]}',
+    "5-dev-preview": '{"tags":[{"name":"5.1.0-ec.1","pullSpec":"ps-5.1.0-ec.1"}]}',
+}
+
+
+def run_resolver_offline_http(call, ga_version, sippy_releases=("4.22", "5.0", "5.1")):
+    """Run a resolver that reaches the tags/Sippy HTTP endpoints, with _curl_with_retry
+    stubbed. Echoes each requested URL to stderr so the test can assert which stream
+    was consulted. Returns (returncode, stdout, stderr).
+    """
+    cases = "\n".join(
+        f'        *{stream}/tags*) echo {payload!r} ;;' for stream, payload in _TAG_PAYLOADS.items()
+    )
+    sippy = json.dumps({"releases": list(sippy_releases)})
+    script = f"""
+set -euo pipefail
+source "{RELEASES_LIB}"
+get_latest_ga_version() {{ echo "{ga_version}"; }}
+_curl_with_retry() {{
+    echo "URL>$1" >&2
+    case "$1" in
+        *sippy*) echo {sippy!r} ;;
+{cases}
+        *) echo '{{"tags":[]}}' ;;
+    esac
+}}
+{call}
+"""
+    proc = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=False)
     return proc.returncode, proc.stdout.strip(), proc.stderr
 
 
@@ -261,3 +299,92 @@ def test_failure_diagnostic_is_bounded_and_non_sensitive():
     assert "5.0.29" not in err  # capped at the 10 newest
     # The stream contents are sampled, not dumped
     assert err.count("5.0.") <= 11
+
+
+# --- HTTP-backed resolvers on gap-all.sh's auto-detect path ----------------
+
+def test_latest_dev_version_keeps_ga_major():
+    """Regression: the dev line was built as "4.${ga_minor+1}", so GA=5.0 asked for 4.1."""
+    rc, out, err = run_resolver_offline_http("get_latest_dev_version", ga_version="5.0")
+    assert rc == 0, err
+    assert out == "5.1"
+
+
+def test_latest_dev_version_preserves_4x_behavior():
+    rc, out, err = run_resolver_offline_http(
+        "get_latest_dev_version", ga_version="4.22", sippy_releases=("4.22", "4.23")
+    )
+    assert rc == 0, err
+    assert out == "4.23"
+
+
+def test_stable_pullspec_uses_major_stream_and_skips_rc():
+    """gap-all.sh:260-261 pairs get_latest_stable_version with this function, so both
+    must pick the same release: the major's own stable stream, RC builds excluded."""
+    rc, out, err = run_resolver_offline_http("get_latest_stable_pullspec", ga_version="5.0")
+    assert rc == 0, err
+    assert "releasestream/5-stable/tags" in err
+    assert "releasestream/4-stable/tags" not in err
+    assert out == "ps-5.0.1"  # not ps-rc8, which the payload lists first
+
+
+def test_stable_pullspec_preserves_4x_behavior():
+    rc, out, err = run_resolver_offline_http("get_latest_stable_pullspec", ga_version="4.22")
+    assert rc == 0, err
+    assert "releasestream/4-stable/tags" in err
+    assert out == "ps-4.22.21"
+
+
+def test_candidate_pullspec_uses_major_streams():
+    rc, out, err = run_resolver_offline_http("get_latest_candidate_pullspec", ga_version="5.0")
+    assert rc == 0, err
+    assert "releasestream/5-stable/tags" in err
+    assert "releasestream/5-dev-preview/tags" in err
+    assert "releasestream/4-" not in err
+    assert out == "ps-5.1.0-ec.1"
+
+
+# --- gap-all.sh consumer path ----------------------------------------------
+
+GAP_ALL_CONSUMER = """
+resolve_result=$(resolve_openshift_version "5.0")
+echo "REACHED_NEXT_STEP"
+echo "BASELINE=$(echo "$resolve_result" | awk '{print $1}')"
+echo "TARGET=$(echo "$resolve_result" | awk '{print $2}')"
+"""
+
+
+def test_consumer_path_produces_the_expected_5_0_comparison():
+    """The exact shape of the live 5-stable stream must yield a real comparison.
+
+    Mirrors scripts/gap-all.sh:5,9,190: `set -euo pipefail`, source the library,
+    assign from resolve_openshift_version. The fix must not make the reported
+    failure "pass" by skipping.
+    """
+    rc, out, err = run_resolver(
+        GAP_ALL_CONSUMER,
+        streams={"5-stable": ["5.0.1", "5.0.0", "5.0.0-rc.8"]},
+        ga_version="5.0",
+    )
+    assert rc == 0, err
+    assert "REACHED_NEXT_STEP" in out
+    assert "BASELINE=5.0.0" in out
+    assert "TARGET=5.0.1" in out
+    assert "SKIP" not in out
+
+
+def test_consumer_path_still_fails_when_the_line_has_no_stable_release():
+    """A line present in the streams but with no stable release is a real error:
+    the job must go red, not green and not SKIP. Guards the `set -e` handling."""
+    rc, out, err = run_resolver(
+        GAP_ALL_CONSUMER,
+        streams={
+            "5-stable": ["5.0.0-rc.8", "5.0.0-rc.7"],
+            "5.0.0-0.nightly": ["5.0.0-0.nightly-2026-11-01"],
+        },
+        ga_version="5.0",
+    )
+    assert rc != 0
+    assert "REACHED_NEXT_STEP" not in out
+    assert "No stable versions found for 5.0.x" in err
+    assert "5-stable holds 2 accepted version(s)" in err

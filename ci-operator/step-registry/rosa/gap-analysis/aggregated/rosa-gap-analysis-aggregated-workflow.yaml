@@ -8,9 +8,8 @@ workflow:
     - ref: rosa-gap-analysis-setup
     - ref: rosa-gap-analysis-ocm-auth
     - ref: rosa-gap-analysis-resolve-versions
-    test:
-    - chain: rosa-gap-analysis-checks
     post:
+    - chain: rosa-gap-analysis-checks
     - ref: rosa-gap-analysis-report
     - ref: rosa-gap-analysis-cleanup
   documentation: |-
@@ -19,6 +18,8 @@ workflow:
     cluster provisioning. Each check also emits its own per-check report, and the
     report step aggregates them into the combined HTML/JSON.
       pre:  setup -> ocm-auth -> resolve-versions
-      test: rosa-gap-analysis-checks chain
-      post: report (combined) -> cleanup
+      post: rosa-gap-analysis-checks chain -> report (combined) -> cleanup
+    The checks run in `post` (not `test`) so every check runs even if an earlier
+    one fails; a standard-check FAIL still fails the job, and report/cleanup
+    always run afterward.
     Set OPENSHIFT_VERSION (e.g. 4.22 or 5.0) or override BASELINE/TARGET.

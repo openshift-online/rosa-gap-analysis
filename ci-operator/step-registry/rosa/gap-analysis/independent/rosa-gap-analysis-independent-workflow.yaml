@@ -8,9 +8,8 @@ workflow:
     - ref: rosa-gap-analysis-setup
     - ref: rosa-gap-analysis-ocm-auth
     - ref: rosa-gap-analysis-resolve-versions
-    test:
-    - chain: rosa-gap-analysis-checks
     post:
+    - chain: rosa-gap-analysis-checks
     - ref: rosa-gap-analysis-cleanup
   documentation: |-
     Independent-steps gap-analysis (workflow 2 of 2): runs each check as an
@@ -19,8 +18,7 @@ workflow:
     reports are the deliverable, so a report is generated independently for each
     check. No cluster provisioning.
       pre:  setup -> ocm-auth -> resolve-versions
-      test: rosa-gap-analysis-checks chain (each ref self-reports)
-      post: cleanup
+      post: rosa-gap-analysis-checks chain (each ref self-reports) -> cleanup
     Add, remove, or reorder checks by inlining the refs from the
     rosa-gap-analysis-checks chain into `test`, or run any single check ref on its
     own. The rosa-gap-analysis-report step can still be run afterward against any

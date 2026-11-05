@@ -10,26 +10,24 @@ GAP_SCRIPTS_DIR="${GAP_SCRIPTS_DIR:-/gap-analysis/scripts}"
 REPORTS_DIR="${SHARED_DIR}/gap-analysis-reports"
 mkdir -p "${REPORTS_DIR}"
 
-# Optional OCM login so OCM/ROSA-backed data is available; degrades gracefully.
-# Prefer the token the rosa-gap-analysis-ocm-auth step wrote to SHARED_DIR, then
-# fall back to the cluster profile (each ci-operator step runs in its own pod, so
-# the login itself cannot be shared - only the token can).
+# OCM login so OCM/ROSA-backed data is available; degrades gracefully when no
+# credentials are present. Uses the same variables and logic as
+# scripts/lib/ocm_auth.sh (OCM_TOKEN, or OCM_CLIENT_ID + OCM_CLIENT_SECRET, with
+# OCM_URL). Credentials come from the ci-operator mount at /var/run/ocm-credentials
+# (files named after the variables); each step authenticates in its own pod.
 if command -v ocm >/dev/null 2>&1; then
-  ocm_token=""
-  if [[ -f "${SHARED_DIR}/ocm-token" ]]; then
-    ocm_token="$(cat "${SHARED_DIR}/ocm-token" 2>/dev/null || true)"
-  elif [[ -n "${CLUSTER_PROFILE_DIR:-}" && -f "${CLUSTER_PROFILE_DIR}/ocm-token" ]]; then
-    ocm_token="$(cat "${CLUSTER_PROFILE_DIR}/ocm-token" 2>/dev/null || true)"
+  # shellcheck source=/dev/null
+  source "${GAP_SCRIPTS_DIR}/lib/logging.sh"
+  # shellcheck source=/dev/null
+  source "${GAP_SCRIPTS_DIR}/lib/ocm_auth.sh"
+  ocm_load_credentials "${OCM_CREDENTIALS_DIR:-/var/run/ocm-credentials}"
+  # Back-compat: honor a token staged by the ocm-auth step or the cluster profile.
+  if [[ -z "${OCM_TOKEN:-}" && -f "${SHARED_DIR}/ocm-token" ]]; then
+    OCM_TOKEN="$(cat "${SHARED_DIR}/ocm-token")"; export OCM_TOKEN
+  elif [[ -z "${OCM_TOKEN:-}" && -n "${CLUSTER_PROFILE_DIR:-}" && -f "${CLUSTER_PROFILE_DIR}/ocm-token" ]]; then
+    OCM_TOKEN="$(cat "${CLUSTER_PROFILE_DIR}/ocm-token")"; export OCM_TOKEN
   fi
-  if [[ -n "${ocm_token}" ]]; then
-    if ocm login --url "${OCM_LOGIN_ENV:-staging}" --token "${ocm_token}" >/dev/null 2>&1; then
-      log "Logged into OCM (${OCM_LOGIN_ENV:-staging})"
-    else
-      log "WARNING: OCM login failed; Target E2E Validation will use graceful fallback"
-    fi
-  else
-    log "No OCM token available; Target E2E Validation OCM data uses graceful fallback"
-  fi
+  OCM_URL="${OCM_LOGIN_ENV:-staging}" ocm_authenticate || log "WARNING: OCM login failed; OCM-backed data uses graceful fallback"
 fi
 
 # Resolve versions: prefer the shared gap-versions.env, else fall back to env.

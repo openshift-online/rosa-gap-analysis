@@ -23,3 +23,18 @@ ocm_authenticate() {
         log_info "Cannot log in to OCM due to missing credentials"
     fi
 }
+
+# Load OCM credentials from the ci-operator credential mount into the variables
+# ocm_authenticate() consumes. The file keys match the rosa-e2e / gap-analysis
+# credential collection used by the gap-analysis CI config (sso-client-id,
+# sso-client-secret). Values already set in the environment take precedence
+# (e.g. when the job exports OCM_CLIENT_ID / OCM_CLIENT_SECRET directly).
+ocm_load_credentials() {
+    local dir="${1:-/var/run/ocm-credentials}"
+    if [[ -z "${OCM_CLIENT_ID:-}" && -f "${dir}/sso-client-id" ]]; then
+        export OCM_CLIENT_ID="$(<"${dir}/sso-client-id")"
+    fi
+    if [[ -z "${OCM_CLIENT_SECRET:-}" && -f "${dir}/sso-client-secret" ]]; then
+        export OCM_CLIENT_SECRET="$(<"${dir}/sso-client-secret")"
+    fi
+}

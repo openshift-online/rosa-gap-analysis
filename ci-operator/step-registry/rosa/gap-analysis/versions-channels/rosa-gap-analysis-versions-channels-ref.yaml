@@ -4,6 +4,10 @@ ref:
   grace_period: 1m
   timeout: 20m
   commands: rosa-gap-analysis-versions-channels-commands.sh
+  credentials:
+  - collection: rosa-e2e
+    group: gap-analysis
+    mount_path: /var/run/ocm-credentials
   resources:
     requests:
       cpu: 100m

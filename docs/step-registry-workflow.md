@@ -33,11 +33,14 @@ workflows.
   `${SHARED_DIR}/gap-versions.env` in the same format the checks source; OCM login via
   `ocm_authenticate` (an in-container login the check scripts inherit, rather than the
   `ocm-auth` ref's token file); the combined report; the final summary; and the exit code.
-- **Delegated:** each check runs its `<check>/*-commands.sh` (via `REGISTRY_DIR` + the
-  `run_all_steps` method), in the same static order as the `rosa-gap-analysis-checks`
-  chain, feature-gates last. It runs every selected check even after a standard check
-  fails, then exits 1 if any standard check failed.
-- GA readiness stays out (it is not in the chain).
+- **Delegated:** `run_all_steps` calls `scripts/run-workflow.py`, which reads the
+  aggregated workflow YAML, expands the `rosa-gap-analysis-checks` chain, and reads each
+  ref YAML's `commands:` — so the chain and ref YAML (not a hardcoded list) decide which
+  checks run and in what order, feature-gates last. `gap-all.sh` then executes each
+  resolved `commands.sh`, honoring `--steps`, running every selected check even after a
+  standard check fails, then exits 1 if any standard check failed.
+- GA readiness stays out: its ref is not in the workflow/chain, so `run-workflow.py`
+  never emits it.
 
 This stays one Prow step with one log. Separate pods per check only happen when
 openshift/release runs the `rosa-gap-analysis-aggregated` workflow itself.
@@ -57,7 +60,7 @@ Lifecycle:
 | Ref | Phase | Purpose |
 |-----|-------|---------|
 | `rosa-gap-analysis-setup` | pre | Validate prerequisites (python3/jq), init `${SHARED_DIR}/gap-analysis-reports`, clear stale state |
-| `rosa-gap-analysis-ocm-auth` | pre | Validate the OCM token from `${CLUSTER_PROFILE_DIR}/ocm-token`; stage it at `${SHARED_DIR}/ocm-token` for downstream reuse (graceful no-op if absent) |
+| `rosa-gap-analysis-ocm-auth` | pre | Validate OCM login via `scripts/lib/ocm_auth.sh` using `OCM_CLIENT_ID`/`OCM_CLIENT_SECRET` read from the `rosa-e2e`/`gap-analysis` credential collection mounted at `/var/run/ocm-credentials` (keys `sso-client-id`, `sso-client-secret`); stage a token at `${SHARED_DIR}/ocm-token` when one is provided (graceful no-op if no creds) |
 | `rosa-gap-analysis-resolve-versions` | pre | Resolve `BASELINE`/`TARGET` once; write `${SHARED_DIR}/gap-versions.env` (safe `printf %q`); emit `GAP_SKIP=1` to skip gracefully |
 | `rosa-gap-analysis-report` | post | Aggregate per-check reports into the combined HTML/JSON report |
 | `rosa-gap-analysis-cleanup` | post | Remove staged secrets/scratch (`ocm-token`, `gap-versions.env`) and analyzer temp dirs |
@@ -102,13 +105,14 @@ for a single check or any subset.
 
 1. **`rosa-gap-analysis-aggregated`** — full validation + combined report.
    - `pre`: setup → ocm-auth → resolve-versions
-   - `test`: `rosa-gap-analysis-checks` chain
-   - `post`: report (combined) → cleanup
+   - `post`: `rosa-gap-analysis-checks` chain → report (combined) → cleanup
 2. **`rosa-gap-analysis-independent`** — every check runs independently and
    produces its own per-check report; no combined aggregation.
    - `pre`: setup → ocm-auth → resolve-versions
-   - `test`: `rosa-gap-analysis-checks` chain (each ref self-reports)
-   - `post`: cleanup
+   - `post`: `rosa-gap-analysis-checks` chain (each ref self-reports) → cleanup
+
+The checks run in `post` (not `test`) so every check runs even if an earlier one
+fails; a standard-check FAIL still fails the job, and report/cleanup run afterward.
 
 GA readiness is intentionally **not** a workflow: `rosa-gap-analysis-ga-validation`
 is run individually only (manually by SREs), never wired into a CI workflow or the
@@ -122,7 +126,8 @@ through `${SHARED_DIR}`; artifacts go to `${ARTIFACT_DIR}`.
 | Variable | Produced by | Consumed by | Meaning |
 |----------|-------------|-------------|---------|
 | `${SHARED_DIR}/gap-versions.env` | resolve-versions | checks, report | `GAP_SKIP`, `BASELINE`, `TARGET` (shell-quoted) |
-| `${SHARED_DIR}/ocm-token` | ocm-auth | checks | validated OCM token for `ocm login` |
+| `/var/run/ocm-credentials/{sso-client-id,sso-client-secret}` | `rosa-e2e`/`gap-analysis` credential collection (`credentials:` mount) | ocm-auth, checks | OCM creds; each step loads them into `OCM_CLIENT_ID`/`OCM_CLIENT_SECRET` and logs in via `scripts/lib/ocm_auth.sh` (`ocm_load_credentials` + `ocm_authenticate`) |
+| `${SHARED_DIR}/ocm-token` | ocm-auth | checks | back-compat token for `ocm login` (staged only when a token was provided) |
 | `${SHARED_DIR}/gap-analysis-reports` | checks | report | per-check JSON/HTML + status files |
 | `${ARTIFACT_DIR}` | every step | CI | per-step artifacts + per-step logs |
 | `OPENSHIFT_VERSION` / `BASELINE` / `TARGET` | job env | resolve-versions, checks | version inputs (precedence: OPENSHIFT_VERSION > BASELINE+TARGET > auto-detect) |
@@ -132,8 +137,9 @@ through `${SHARED_DIR}`; artifacts go to `${ARTIFACT_DIR}`.
 **Exit semantics** map to ci-operator per-step: standard checks exit non-zero on
 validation FAIL (failing the step/job); informational checks exit 0 on findings
 and non-zero only on execution error; `report` never owns the verdict.
-`test` steps are fail-fast — to run every check in one pass and still fail on any
-standard FAIL, move the check refs into `post` with `best_effort: false`.
+The checks run in `post` (not `test`): `post` steps all run regardless of earlier
+failures, so one failed check does not skip the rest, while a standard check's
+non-zero exit still fails the job.
 
 ## Running checks individually
 

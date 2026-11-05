@@ -17,6 +17,11 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 # scripts directly. Overridable via REGISTRY_DIR for non-standard layouts.
 REGISTRY_DIR="${REGISTRY_DIR:-${PROJECT_ROOT}/ci-operator/step-registry/rosa/gap-analysis}"
 
+# The nightly follows the aggregated workflow's check chain. run-workflow.py reads
+# this YAML (plus the chain and each ref YAML) to decide which checks run, in what
+# order, and which commands.sh to execute. Overridable via WORKFLOW_YAML.
+WORKFLOW_YAML="${WORKFLOW_YAML:-${REGISTRY_DIR}/aggregated/rosa-gap-analysis-aggregated-workflow.yaml}"
+
 BASELINE=""
 TARGET=""
 VERSION=""
@@ -607,20 +612,21 @@ EOF
         echo "[$symbol] CHECK #$check_num: $check_name - $status ($message)"
     }
 
-    # Map each --steps short name to its step-registry ref directory.
-    # (Most are 1:1; aws/gcp/ocp/critical-alerts differ from the short name.)
-    declare -A step_to_ref=(
-        ["aws"]="aws-sts"
-        ["gcp"]="gcp-wif"
-        ["ocp"]="ocp-gate-ack"
-        ["versions-channels"]="versions-channels"
-        ["ocm-version-gate"]="ocm-version-gate"
-        ["api-resources"]="api-resources"
-        ["critical-alerts"]="critical-alerts-diff"
-        ["cluster-install"]="cluster-install"
-        ["e2e-validation"]="e2e-validation"
-        ["upgrade-e2e"]="upgrade-e2e"
-        ["feature-gates"]="feature-gates"
+    # Map each step-registry ref to its --steps short name (used only for subset
+    # selection and the summary metadata). The order and the commands script come
+    # from the workflow/chain/ref YAML via run-workflow.py — not from here.
+    declare -A ref_to_step=(
+        ["rosa-gap-analysis-aws-sts"]="aws"
+        ["rosa-gap-analysis-gcp-wif"]="gcp"
+        ["rosa-gap-analysis-ocp-gate-ack"]="ocp"
+        ["rosa-gap-analysis-versions-channels"]="versions-channels"
+        ["rosa-gap-analysis-ocm-version-gate"]="ocm-version-gate"
+        ["rosa-gap-analysis-api-resources"]="api-resources"
+        ["rosa-gap-analysis-critical-alerts-diff"]="critical-alerts"
+        ["rosa-gap-analysis-cluster-install"]="cluster-install"
+        ["rosa-gap-analysis-e2e-validation"]="e2e-validation"
+        ["rosa-gap-analysis-upgrade-e2e"]="upgrade-e2e"
+        ["rosa-gap-analysis-feature-gates"]="feature-gates"
     )
 
     # Stage the environment the step-registry check commands.sh expect. Each
@@ -660,13 +666,13 @@ EOF
         } > "${SHARED_DIR}/gap-versions.env"
     }
 
-    # Run one check by delegating to its step-registry commands.sh (the single
-    # source of per-check logic). Normalizes any non-zero exit to 1 and reads
-    # the status file, preserving the informational-vs-standard semantics.
+    # Run one check by executing the step-registry commands.sh named in its ref
+    # YAML (resolved by run-workflow.py and passed in as $2). Normalizes any
+    # non-zero exit to 1 and reads the status file, preserving the
+    # informational-vs-standard semantics.
     run_check_step() {
         local step="$1"
-        local ref="${step_to_ref[$step]}"
-        local cmd="${REGISTRY_DIR}/${ref}/rosa-gap-analysis-${ref}-commands.sh"
+        local cmd="$2"
         local name="${check_name[$step]}"
 
         log_info ""
@@ -691,20 +697,30 @@ EOF
         read_check_status "$step"
     }
 
-    # Run every selected check (default: all) in the same static order as the
-    # rosa-gap-analysis-checks chain. Feature Gates must stay last.
+    # Follow the aggregated workflow: run-workflow.py reads the workflow YAML,
+    # expands the rosa-gap-analysis-checks chain, and emits each check ref with
+    # the commands script named in its ref YAML, in order. --steps still selects
+    # a subset. Unlike a ci-operator `test:` phase (which stops on the first
+    # failure), this runner keeps going after a standard check fails; the final
+    # exit code is decided from check_results below.
     run_all_steps() {
-        local ordered_steps=(
-            aws gcp ocp versions-channels ocm-version-gate
-            api-resources critical-alerts cluster-install e2e-validation
-            upgrade-e2e feature-gates
-        )
-        local step
-        for step in "${ordered_steps[@]}"; do
-            if should_run_step "$step"; then
-                run_check_step "$step"
+        local plan ref cmd step rc=0
+        plan="$(python3 "${SCRIPT_DIR}/run-workflow.py" "${WORKFLOW_YAML}")" || rc=$?
+        if [[ $rc -ne 0 || -z "$plan" ]]; then
+            log_error "Failed to resolve workflow steps from ${WORKFLOW_YAML}; cannot run checks"
+            exit 1
+        fi
+        while IFS=$'\t' read -r ref cmd; do
+            [[ -z "$ref" ]] && continue
+            step="${ref_to_step[$ref]:-}"
+            if [[ -z "$step" ]]; then
+                log_warning "No --steps alias for ref '${ref}'; skipping"
+                continue
             fi
-        done
+            if should_run_step "$step"; then
+                run_check_step "$step" "$cmd"
+            fi
+        done <<< "$plan"
     }
 
     # Delegate all checks to their step-registry commands.sh.

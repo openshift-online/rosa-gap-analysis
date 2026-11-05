@@ -79,7 +79,7 @@ for script in "${help_scripts[@]}"; do
     fi
 done
 
-echo "==> gap-all.sh delegates to step-registry commands.sh; every gap-*.py is wired; feature-gates last"
+echo "==> gap-all.sh follows the workflow YAML (run-workflow.py); every gap-*.py is wired; feature-gates last"
 REGISTRY="ci-operator/step-registry/rosa/gap-analysis"
 
 # gap-all.sh must delegate to the step-registry (single source of check logic),
@@ -89,6 +89,15 @@ if grep -qE 'python3 "\$\{SCRIPT_DIR\}/gap-[a-z0-9-]+\.py"' scripts/gap-all.sh; 
 fi
 if ! grep -q 'run_all_steps' scripts/gap-all.sh; then
     fail "scripts/gap-all.sh is missing run_all_steps (step delegation)"
+fi
+
+# Order + commands scripts must come from the workflow/chain/ref YAML, resolved
+# by run-workflow.py — not a hardcoded list in gap-all.sh.
+if [[ ! -f scripts/run-workflow.py ]]; then
+    fail "scripts/run-workflow.py (workflow step resolver) is missing"
+fi
+if ! grep -q 'run-workflow.py' scripts/gap-all.sh; then
+    fail "scripts/gap-all.sh must resolve steps via run-workflow.py"
 fi
 
 # Every scripts/gap-*.py must be invoked by a step-registry check commands.sh.
@@ -103,26 +112,8 @@ for name in "${gap_scripts[@]}"; do
     fi
 done
 
-# Feature gates must run last in gap-all.sh's ordered_steps array.
-ga_last=$(awk '
-    /local ordered_steps=\(/ {cap=1}
-    cap {
-        line=$0
-        sub(/.*ordered_steps=\(/, "", line)
-        sub(/\).*/, "", line)
-        buf = buf " " line
-        if ($0 ~ /\)/) cap=0
-    }
-    END {
-        n = split(buf, a, /[ \t]+/)
-        for (i=n; i>=1; i--) if (a[i] != "") { print a[i]; break }
-    }
-' scripts/gap-all.sh)
-if [[ "${ga_last}" != "feature-gates" ]]; then
-    fail "Feature gates must be last in gap-all.sh ordered_steps (last is '${ga_last}')"
-fi
-
-# Feature gates must also be last in the checks chain consumed by ci-operator.
+# Feature gates must run last in the checks chain — the authoritative order that
+# gap-all.sh follows via run-workflow.py.
 chain="${REGISTRY}/checks/rosa-gap-analysis-checks-chain.yaml"
 chain_last=$(grep -E '^[[:space:]]*-[[:space:]]*ref:' "${chain}" 2>/dev/null \
     | tail -1 | grep -oE 'rosa-gap-analysis-[a-z0-9-]+' || true)

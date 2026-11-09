@@ -15,6 +15,7 @@ than passing silently.
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -279,6 +280,35 @@ def test_overall_time_budget_stops_retrying(harness):
     assert "attempt 1/50 failed with a transient error" in result.stderr
     assert "giving up after 3s total" in result.stderr
     assert "last HTTP 504" in result.stderr
+    assert not h.dest.exists()
+
+
+@pytest.mark.parametrize("base_delay", ["5", "30"])
+def test_backoff_sleep_never_overruns_the_total_budget(harness, base_delay):
+    """The retry backoff must not sleep past GAP_DOWNLOAD_TOTAL_MAX_TIME.
+
+    The delay doubles per attempt, so an unclamped sleep can run well past the
+    overall deadline the budget promises. With a 2s budget an unclamped 5s or
+    30s backoff overshoots; the clamp keeps total wall clock inside the budget
+    and no further curl may be invoked once it is spent.
+    """
+    budget = 2
+    h = harness(["504:22"])
+    start = time.monotonic()
+    result = h.run(
+        GAP_DOWNLOAD_MAX_ATTEMPTS="50",
+        GAP_DOWNLOAD_RETRY_BASE_DELAY=base_delay,
+        GAP_DOWNLOAD_TOTAL_MAX_TIME=str(budget),
+    )
+    elapsed = time.monotonic() - start
+
+    assert result.returncode == 22
+    # Slack covers process startup and the one-second granularity of SECONDS.
+    # The pre-fix signal is 5.0s / 30.0s, so this still discriminates.
+    assert elapsed < budget + 2.5, f"slept past the budget: {elapsed:.1f}s for a {budget}s budget"
+    assert f"giving up after {budget}s total" in result.stderr
+    # The budget is spent, so the loop must not start another transfer.
+    assert h.calls == 1, f"expected 1 attempt before the budget was spent, got {h.calls}"
     assert not h.dest.exists()
 
 

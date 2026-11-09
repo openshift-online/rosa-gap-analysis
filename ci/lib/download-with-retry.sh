@@ -61,8 +61,11 @@
 # Usage: download-with-retry <url> <destination>
 # Exit:  0 on success
 #        2 on a usage or configuration error
-#        curl's non-zero exit status on a permanent failure, or after the
-#        attempt budget or the total time budget is exhausted
+#        curl's non-zero exit status whenever there is one to report: a
+#        permanent failure, or a budget exhausted after a curl failure
+#        28 when the total time budget is exhausted with no curl failure to
+#        report (repeated empty bodies, or no attempt fitted in the budget)
+#        1 when the attempt budget is exhausted on repeated empty bodies
 # =============================================================================
 
 set -euo pipefail
@@ -71,6 +74,10 @@ set -euo pipefail
 # by ci/Containerfile (openshift-client-linux.tar.gz, ~120 MB): 300s covers that
 # over a slow link. TOTAL_MAX_TIME caps the whole download so a sustained outage
 # fails the build promptly instead of stalling it until the Prow step times out.
+# The overall budget is measured with SECONDS, which counts from process start.
+# ci/Containerfile executes this file as a command at every call site, so that
+# is the download's own elapsed time. It is not written to be sourced. SECONDS
+# truncates to whole seconds, so the budget holds to one-second granularity.
 readonly CONNECT_TIMEOUT=20
 readonly MAX_TIME=300
 
@@ -216,6 +223,17 @@ main() {
         fi
 
         delay=$(( RETRY_BASE_DELAY * 2 ** (attempt - 1) ))
+        # Recompute against the clock: the attempt just made consumed budget,
+        # and the delay doubles each round, so an unguarded sleep would run past
+        # TOTAL_MAX_TIME. If the next attempt could not start inside the budget
+        # the outcome is already decided, so stop now instead of sleeping out
+        # time whose result is known. (A negative delay means the doubling
+        # overflowed; treat it as exhausted rather than passing it to sleep.)
+        remaining=$(( TOTAL_MAX_TIME - SECONDS ))
+        if [[ ${delay} -lt 0 || ${delay} -ge ${remaining} ]]; then
+            log "giving up after ${TOTAL_MAX_TIME}s total: ${dest} (last HTTP ${http_code:-none}, last curl exit ${curl_exit})"
+            return $(( curl_exit > 0 ? curl_exit : 28 ))
+        fi
         log "retrying in ${delay}s"
         sleep "${delay}"
         attempt=$(( attempt + 1 ))

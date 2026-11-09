@@ -210,6 +210,7 @@ from reporters import generate_html_report, generate_json_report
 - Includes: `oc` CLI, Python 3, PyYAML, Jinja2, `jq`, `yq`, `gh`, curl, git, make, bash
 - Scripts pre-installed at `/gap-analysis/scripts/` and in PATH
 - Writable temp dirs (`/tmp/.cache`, `/tmp/gap-analysis-data`) for random UID support
+- Tool downloads (`yq`, `oc`, `ocm`, `rosa`) go through `download-with-retry` (`ci/lib/download-with-retry.sh`) so a transient gateway error does not abort the build root; permanent errors and exhausted retries still fail the build
 - Working directory: `/gap-analysis`
 
 **Prow jobs:**
@@ -298,6 +299,7 @@ from reporters import generate_html_report, generate_json_report
 - `ci/lib/failure-parser.sh` - CI-specific Prow failure parsing utilities
 - `ci/lib/prow-api.sh` - CI-specific Prow API interaction utilities
 - `ci/lib/validate-wif-template.sh` - WIF template validation (service account/role ID constraints)
+- `ci/lib/download-with-retry.sh` - Bounded-retry tool downloader used by `ci/Containerfile` (retries HTTP 408/429/500/502/503/504, network-level curl exits 6/7/16/18/28/52/56/92, and empty bodies; everything else, including a 404, fails on the first attempt; up to 4 attempts, 300s per attempt, 600s overall by default, whichever binds first)
 
 ## Runtime Dependencies
 

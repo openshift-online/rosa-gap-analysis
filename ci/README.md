@@ -284,7 +284,8 @@ ci/
 │   ├── prow-api.sh              # Prow deck API functions
 │   ├── failure-parser.sh        # JSON report parsing
 │   ├── generate-fixes.py        # File content generation
-│   └── validate-wif-template.sh # WIF template validation
+│   ├── validate-wif-template.sh # WIF template validation
+│   └── download-with-retry.sh   # Bounded-retry tool downloader (Containerfile)
 ├── templates/                   # PR description templates
 │   └── pr-body.md               # PR template with placeholders
 ├── artifacts/                   # Downloaded artifacts (gitignored)

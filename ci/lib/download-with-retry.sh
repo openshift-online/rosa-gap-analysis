@@ -46,12 +46,17 @@
 #   Exhaustion: exits with curl's non-zero status so the build still fails.
 #
 # DIAGNOSTICS
-#   Attempt number, HTTP status and curl exit code are written to stderr so a
-#   failure is diagnosable from the build log alone. stdout is left empty.
-#   Only the requested URL with its query string and any userinfo removed is
-#   logged; redirect targets and response headers are never printed, because
-#   release CDNs sign those with query credentials. curl's own --show-error text
-#   is passed through unfiltered: it reports a status or host, never a URL.
+#   Attempt number, HTTP status, curl exit code and a short reason are written
+#   to stderr so a failure is diagnosable from the build log alone. stdout is
+#   left empty.
+#   No part of the URL is ever logged. The destination path is used as the
+#   artifact identifier instead: it is a literal in ci/Containerfile, whereas
+#   the URL is assembled from build ARGs (OCM_CLI_BASE_URL, ROSA_CLI_BASE_URL)
+#   that a downstream build may point at an internal mirror, and a path segment
+#   or query parameter can itself carry a token. curl runs without
+#   --show-error for the same reason: its messages name the host it failed to
+#   resolve or connect to. The status and exit code this script prints carry
+#   the same diagnostic information without the host.
 #
 # Usage: download-with-retry <url> <destination>
 # Exit:  0 on success
@@ -102,12 +107,23 @@ check_count() {
     fi
 }
 
-# Strip the query string and any user:password@ authority so credentials can
-# never reach the build log.
-redact_url() {
-    local url="${1%%\?*}"
-    local sep="//"
-    printf '%s' "${url/${sep}*@/${sep}}"
+# Short, host-free explanation of a curl exit code, so dropping --show-error
+# costs no diagnostic information.
+curl_reason() {
+    case "$1" in
+        6)  printf 'could not resolve host' ;;
+        7)  printf 'could not connect' ;;
+        16|92) printf 'HTTP/2 protocol error' ;;
+        18) printf 'transfer closed before completion' ;;
+        22) printf 'HTTP error response' ;;
+        23) printf 'could not write destination' ;;
+        28) printf 'timed out' ;;
+        35) printf 'TLS connect error' ;;
+        52) printf 'empty reply from server' ;;
+        55) printf 'send error' ;;
+        56) printf 'receive error' ;;
+        *)  printf 'curl error' ;;
+    esac
 }
 
 main() {
@@ -117,9 +133,8 @@ main() {
     fi
 
     local url="$1"
+    # The destination, not the URL, is this download's identifier in the log.
     local dest="$2"
-    local safe_url
-    safe_url="$(redact_url "${url}")"
 
     check_count GAP_DOWNLOAD_MAX_ATTEMPTS "${MAX_ATTEMPTS}" '^[1-9][0-9]*$' || return 2
     check_count GAP_DOWNLOAD_RETRY_BASE_DELAY "${RETRY_BASE_DELAY}" '^[0-9]+$' || return 2
@@ -139,14 +154,14 @@ main() {
             attempt_max_time="${remaining}"
         fi
         if [[ ${attempt_max_time} -le 0 ]]; then
-            log "giving up after ${TOTAL_MAX_TIME}s total: ${safe_url} (last HTTP ${http_code:-none}, last curl exit ${curl_exit})"
+            log "giving up after ${TOTAL_MAX_TIME}s total: ${dest} (last HTTP ${http_code:-none}, last curl exit ${curl_exit})"
             return $(( curl_exit > 0 ? curl_exit : 28 ))
         fi
 
         http_code=""
         curl_exit=0
         http_code=$(curl \
-            --silent --show-error --location --fail \
+            --silent --location --fail \
             --connect-timeout "${CONNECT_TIMEOUT}" \
             --max-time "${attempt_max_time}" \
             --write-out '%{http_code}' \
@@ -159,7 +174,7 @@ main() {
         fi
 
         if [[ ${curl_exit} -eq 0 && ${size} -gt 0 ]]; then
-            log "attempt ${attempt}/${MAX_ATTEMPTS} succeeded: ${safe_url} -> ${dest} (HTTP ${http_code}, ${size} bytes)"
+            log "attempt ${attempt}/${MAX_ATTEMPTS} succeeded: ${dest} (HTTP ${http_code}, ${size} bytes)"
             return 0
         fi
 
@@ -181,21 +196,21 @@ main() {
                 retryable=1
             fi
         else
-            reason="transport error"
+            reason="transport error: $(curl_reason "${curl_exit}")"
             if [[ "${RETRYABLE_CURL_EXITS}" == *" ${curl_exit} "* ]]; then
                 retryable=1
             fi
         fi
 
         if [[ ${retryable} -eq 0 ]]; then
-            log "attempt ${attempt}/${MAX_ATTEMPTS} failed permanently (${reason}): ${safe_url} (HTTP ${http_code:-none}, curl exit ${curl_exit}); not retrying"
+            log "attempt ${attempt}/${MAX_ATTEMPTS} failed permanently (${reason}): ${dest} (HTTP ${http_code:-none}, curl exit ${curl_exit}); not retrying"
             return "${curl_exit}"
         fi
 
-        log "attempt ${attempt}/${MAX_ATTEMPTS} failed with a transient error (${reason}): ${safe_url} (HTTP ${http_code:-none}, curl exit ${curl_exit})"
+        log "attempt ${attempt}/${MAX_ATTEMPTS} failed with a transient error (${reason}): ${dest} (HTTP ${http_code:-none}, curl exit ${curl_exit})"
 
         if [[ ${attempt} -ge ${MAX_ATTEMPTS} ]]; then
-            log "giving up after ${MAX_ATTEMPTS} attempts: ${safe_url} (last HTTP ${http_code:-none}, last curl exit ${curl_exit})"
+            log "giving up after ${MAX_ATTEMPTS} attempts: ${dest} (last HTTP ${http_code:-none}, last curl exit ${curl_exit})"
             # An empty body leaves curl_exit at 0; report a failure regardless.
             return $(( curl_exit == 0 ? 1 : curl_exit ))
         fi

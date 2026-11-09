@@ -49,12 +49,14 @@ has_output=0
 has_writeout=0
 has_location=0
 has_fail=0
+has_showerror=0
 for arg in "$@"; do
     case "${arg}" in
-        --output)    has_output=1 ;;
-        --write-out) has_writeout=1 ;;
-        --location)  has_location=1 ;;
-        --fail)      has_fail=1 ;;
+        --output)     has_output=1 ;;
+        --write-out)  has_writeout=1 ;;
+        --location)   has_location=1 ;;
+        --fail)       has_fail=1 ;;
+        --show-error) has_showerror=1 ;;
     esac
     if [ "${prev}" = "--output" ]; then
         dest="${arg}"
@@ -64,6 +66,7 @@ done
 if [ "${has_output}" -eq 0 ]; then
     dest=""
 fi
+url="${!#}"
 
 emit() {
     if [ "${has_writeout}" -eq 1 ]; then
@@ -106,7 +109,9 @@ if [ "${exit_code}" = "22" ]; then
     if [ "${has_fail}" -eq 1 ]; then
         # Real curl --fail writes no output file for an HTTP error response.
         emit "${http_code}"
-        printf 'curl: (22) The requested URL returned error: %s\n' "${http_code}" >&2
+        if [ "${has_showerror}" -eq 1 ]; then
+            printf 'curl: (22) The requested URL returned error: %s\n' "${http_code}" >&2
+        fi
         exit 22
     fi
     # Without --fail curl reports success and saves the error page.
@@ -120,7 +125,11 @@ case "${exit_code}" in
     18|28|56) write_dest 'partial-bytes' ;;
 esac
 emit "${http_code}"
-printf 'curl: (%s) stub transport failure\n' "${exit_code}" >&2
+if [ "${has_showerror}" -eq 1 ]; then
+    # Real curl names the host it could not reach; so must the stub, or the
+    # "no host in the log" tests would pass vacuously.
+    printf 'curl: (%s) stub transport failure for %s\n' "${exit_code}" "${url}" >&2
+fi
 exit "${exit_code}"
 """
 
@@ -129,6 +138,11 @@ class Harness:
     """A stubbed `curl` on PATH plus a runner for the downloader under test."""
 
     def __init__(self, tmp_path, plan):
+        """Install the stub curl under tmp_path and script its outcomes.
+
+        `plan` is the list of per-invocation outcome tokens documented on
+        STUB_CURL; the last entry repeats once the plan runs out.
+        """
         self.bin_dir = tmp_path / "bin"
         self.bin_dir.mkdir()
         stub = self.bin_dir / "curl"
@@ -144,6 +158,11 @@ class Harness:
         self.dest = tmp_path / "artifact.zip"
 
     def env(self, **overrides):
+        """Build the child environment: stub curl first on PATH, no ambient knobs.
+
+        Every inherited GAP_DOWNLOAD_* value is dropped so a developer who
+        exports one while debugging a build cannot change these results.
+        """
         env = {k: v for k, v in os.environ.items() if not k.startswith("GAP_DOWNLOAD_")}
         env.update(
             {
@@ -159,6 +178,7 @@ class Harness:
         return env
 
     def run(self, url="https://example.invalid/tool.zip", args=None, **env_overrides):
+        """Run the downloader once; `args` overrides the whole argument vector."""
         argv = ["bash", str(SCRIPT)]
         argv += args if args is not None else [url, str(self.dest)]
         return subprocess.run(
@@ -171,12 +191,16 @@ class Harness:
 
     @property
     def calls(self):
+        """How many times the downloader has invoked the stub curl."""
         return int(self.count_file.read_text())
 
 
 @pytest.fixture
 def harness(tmp_path):
+    """Return a factory that builds a Harness for a given outcome plan."""
+
     def _make(plan):
+        """Create the Harness; one per test, sharing that test's tmp_path."""
         return Harness(tmp_path, plan)
 
     return _make
@@ -233,7 +257,7 @@ def test_unlisted_transport_failure_is_not_retried(harness):
 
     assert result.returncode == 35
     assert h.calls == 1
-    assert "failed permanently (transport error)" in result.stderr
+    assert "failed permanently (transport error: TLS connect error)" in result.stderr
     assert "not retrying" in result.stderr
 
 
@@ -297,18 +321,67 @@ def test_partial_output_is_removed_on_failure(harness):
     assert not h.dest.exists()
 
 
-def test_query_string_and_userinfo_are_stripped_from_diagnostics(harness):
-    """Diagnostics must never echo CDN query credentials."""
+# Assembled at runtime rather than written as a literal, so no credential-shaped
+# URL is stored in the repository for secret scanners to flag. All parts are
+# synthetic and the host is reserved by RFC 2606.
+SECRET_URL_PARTS = {
+    "user": "ci",
+    "password": "s3" + "cr3t",
+    "internal_host": "artifacts.internal.corp.example",
+    "path_token": "tok" + "_abcdef123456",
+    "query_key": "X-Amz-Signature",
+    "query_value": "dead" + "beefcafe",
+}
+
+
+def _secret_bearing_url():
+    """Build a synthetic URL carrying credentials in userinfo, path and query."""
+    p = SECRET_URL_PARTS
+    return (
+        f"https://{p['user']}:{p['password']}@{p['internal_host']}"
+        f"/repo/{p['path_token']}/tool.zip?{p['query_key']}={p['query_value']}"
+    )
+
+
+def test_no_url_component_reaches_diagnostics(harness):
+    """Host, path, userinfo and query must never appear in the build log.
+
+    ci/Containerfile builds two of the four URLs from overridable ARGs, so the
+    host can be an internal mirror and a path segment can be a token.
+    """
     h = harness(["504:22"])
-    signed = "https://ci:s3cr3t@example.invalid/tool.zip?X-Amz-Signature=deadbeefcafe"
-    result = h.run(url=signed, GAP_DOWNLOAD_MAX_ATTEMPTS="2")
+    result = h.run(url=_secret_bearing_url(), GAP_DOWNLOAD_MAX_ATTEMPTS="2")
 
     assert result.returncode == 22
     combined = result.stdout + result.stderr
-    assert "X-Amz-Signature" not in combined
-    assert "deadbeefcafe" not in combined
-    assert "s3cr3t" not in combined
-    assert "https://example.invalid/tool.zip" in result.stderr
+    for label, value in SECRET_URL_PARTS.items():
+        assert value not in combined, f"{label} leaked into diagnostics: {combined}"
+    assert "https://" not in combined
+    # The destination is the artifact identifier, and the status still shows.
+    assert str(h.dest) in result.stderr
+    assert "HTTP 504" in result.stderr
+    # curl must not be asked for the resolved (signed) redirect target either.
+    assert "url_effective" not in SCRIPT.read_text()
+
+
+def test_curl_stderr_cannot_leak_the_host(harness):
+    """--show-error would print 'Could not resolve host: <internal>'; it is off.
+
+    The host-free reason text has to carry the diagnosis instead.
+    """
+    h = harness(["000:6"])
+    result = h.run(url=_secret_bearing_url(), GAP_DOWNLOAD_MAX_ATTEMPTS="1")
+
+    assert result.returncode == 6
+    combined = result.stdout + result.stderr
+    assert SECRET_URL_PARTS["internal_host"] not in combined
+    assert "stub transport failure" not in combined, "curl stderr reached the log"
+    assert "could not resolve host" in result.stderr
+    assert "curl exit 6" in result.stderr
+    code_lines = [
+        line for line in SCRIPT.read_text().splitlines() if not line.lstrip().startswith("#")
+    ]
+    assert not any("--show-error" in line for line in code_lines)
     # The downloader must not ask curl for the resolved (signed) redirect target.
     assert "url_effective" not in SCRIPT.read_text()
 

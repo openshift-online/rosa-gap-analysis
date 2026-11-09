@@ -182,7 +182,7 @@ download_job_artifacts() {
     trap "rm -rf ${temp_dir}" EXIT
 
     # Download entire job directory
-    log_info "Downloading from GCS: gs://test-platform-results/logs/${job_name}/${job_id}/"
+    log_info "Downloading from GCS: gs://${GCS_BUCKET}/logs/${job_name}/${job_id}/"
     if ! download_job_directory_gcs "${job_name}" "${job_id}" "${temp_dir}"; then
         log_error "Failed to download job directory"
         rm -rf "${temp_dir}"
@@ -483,7 +483,7 @@ main() {
             log_info ""
             log_info "Most recent job is ${job_status}. No analysis needed."
             log_info "To analyze a specific older failed job, use: --job-id <JOB_ID>"
-            log_info "Find job IDs at: https://prow.ci.openshift.org/job-history/gs/test-platform-results/logs/${job_name}"
+            log_info "Find job IDs at: https://prow.ci.openshift.org/job-history/gs/${GCS_BUCKET}/logs/${job_name}"
             exit 0
         fi
 

@@ -12,6 +12,16 @@ source "${SCRIPT_DIR}/lib/ocm_auth.sh"
 # Get project root (one level up from scripts/)
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
+# Step-registry directory. The per-check commands.sh here are the single source
+# of check logic — gap-all.sh delegates to them instead of calling the gap-*.py
+# scripts directly. Overridable via REGISTRY_DIR for non-standard layouts.
+REGISTRY_DIR="${REGISTRY_DIR:-${PROJECT_ROOT}/ci-operator/step-registry/rosa/gap-analysis}"
+
+# The nightly follows the aggregated workflow's check chain. run-workflow.py reads
+# this YAML (plus the chain and each ref YAML) to decide which checks run, in what
+# order, and which commands.sh to execute. Overridable via WORKFLOW_YAML.
+WORKFLOW_YAML="${WORKFLOW_YAML:-${REGISTRY_DIR}/aggregated/rosa-gap-analysis-aggregated-workflow.yaml}"
+
 BASELINE=""
 TARGET=""
 VERSION=""
@@ -327,11 +337,8 @@ if [[ "$DRY_RUN" == "true" ]]; then
     exit 0
 fi
 
-# Build flags for gap scripts
-VERBOSE_FLAG=""
-if [[ "$VERBOSE" == "true" ]]; then
-    VERBOSE_FLAG="--verbose"
-fi
+# --verbose is propagated to the check commands.sh via GAP_VERBOSE,
+# exported in setup_step_environment (the commands.sh add --verbose when set).
 
 
 main() {
@@ -605,220 +612,120 @@ EOF
         echo "[$symbol] CHECK #$check_num: $check_name - $status ($message)"
     }
 
-    # Run AWS STS analysis
-    if should_run_step "aws"; then
-        log_info ""
-        log_info "Running AWS STS Policy Gap Analysis..."
-        if python3 "${SCRIPT_DIR}/gap-aws-sts.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["aws"]=0
-        else
-            local exit_code=$?
-            check_results["aws"]=1
-            log_error "AWS STS analysis script failed with exit code $exit_code"
+    # Map each step-registry ref to its --steps short name (used only for subset
+    # selection and the summary metadata). The order and the commands script come
+    # from the workflow/chain/ref YAML via run-workflow.py — not from here.
+    declare -A ref_to_step=(
+        ["rosa-gap-analysis-aws-sts"]="aws"
+        ["rosa-gap-analysis-gcp-wif"]="gcp"
+        ["rosa-gap-analysis-ocp-gate-ack"]="ocp"
+        ["rosa-gap-analysis-versions-channels"]="versions-channels"
+        ["rosa-gap-analysis-ocm-version-gate"]="ocm-version-gate"
+        ["rosa-gap-analysis-api-resources"]="api-resources"
+        ["rosa-gap-analysis-critical-alerts-diff"]="critical-alerts"
+        ["rosa-gap-analysis-cluster-install"]="cluster-install"
+        ["rosa-gap-analysis-e2e-validation"]="e2e-validation"
+        ["rosa-gap-analysis-upgrade-e2e"]="upgrade-e2e"
+        ["rosa-gap-analysis-feature-gates"]="feature-gates"
+    )
+
+    # Stage the environment the step-registry check commands.sh expect. Each
+    # commands.sh sources ${SHARED_DIR}/gap-versions.env for BASELINE/TARGET,
+    # writes its report into ${SHARED_DIR}/gap-analysis-reports, then copies it
+    # into ${ARTIFACT_DIR}. Pointing ARTIFACT_DIR at REPORT_DIR keeps
+    # status-check-*.json and HTML where this script and the combined report
+    # already read them.
+    setup_step_environment() {
+        export GAP_SCRIPTS_DIR="$SCRIPT_DIR"
+
+        # Propagate --verbose to the check commands.sh (they add --verbose to
+        # their gap-*.py call when GAP_VERBOSE=1).
+        if [[ "$VERBOSE" == "true" ]]; then
+            export GAP_VERBOSE=1
         fi
 
-        # Read status file
-        read_check_status "aws"
-    fi
+        local report_dir_abs
+        report_dir_abs="$(cd "$REPORT_DIR" && pwd)"
+        export ARTIFACT_DIR="$report_dir_abs"
 
-    # Run GCP WIF analysis
-    if should_run_step "gcp"; then
-        log_info ""
-        log_info "Running GCP WIF Policy Gap Analysis..."
-        if python3 "${SCRIPT_DIR}/gap-gcp-wif.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["gcp"]=0
-        else
-            local exit_code=$?
-            check_results["gcp"]=1
-            log_error "GCP WIF analysis script failed with exit code $exit_code"
+        # Reuse a ci-operator-provided SHARED_DIR when present (nightly single
+        # step); otherwise create a private one and remove it on exit.
+        if [[ -z "${SHARED_DIR:-}" ]]; then
+            SHARED_DIR="$(mktemp -d "${TMPDIR:-/tmp}/gap-all.XXXXXX")"
+            export SHARED_DIR
+            # shellcheck disable=SC2064
+            trap "rm -rf '${SHARED_DIR}'" EXIT
         fi
 
-        # Read status file
-        read_check_status "gcp"
-    fi
+        # Versions are resolved by gap-all.sh (which understands BASE_VERSION,
+        # TARGET_VERSION, NIGHTLY, CANDIDATE); the check scripts only read them.
+        {
+            printf 'GAP_SKIP=0\n'
+            printf 'BASELINE=%q\n' "$BASELINE"
+            printf 'TARGET=%q\n' "$TARGET"
+        } > "${SHARED_DIR}/gap-versions.env"
+    }
 
-    # Run OCP Gate Acknowledgment analysis
-    if should_run_step "ocp"; then
+    # Run one check by executing the step-registry commands.sh named in its ref
+    # YAML (resolved by run-workflow.py and passed in as $2). Normalizes any
+    # non-zero exit to 1 and reads the status file, preserving the
+    # informational-vs-standard semantics.
+    run_check_step() {
+        local step="$1"
+        local cmd="$2"
+        local name="${check_name[$step]}"
+
         log_info ""
-        log_info "Running OCP Admin Gate Acknowledgment Analysis..."
-        if python3 "${SCRIPT_DIR}/gap-ocp-gate-ack.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["ocp"]=0
-        else
-            local exit_code=$?
-            check_results["ocp"]=1
-            log_error "OCP Admin Gate Acknowledgment analysis script failed with exit code $exit_code"
+        log_info "Running ${name}..."
+
+        if [[ ! -f "$cmd" ]]; then
+            log_error "Step command script not found: $cmd"
+            check_results[$step]=1
+            read_check_status "$step"
+            return
         fi
 
-        # Read status file
-        read_check_status "ocp"
-    fi
-
-    # Run Versions & Channels analysis (Check #6 - can FAIL for GA targets)
-    if should_run_step "versions-channels"; then
-        log_info ""
-        log_info "Running Version & Channel Gap Analysis..."
-        if python3 "${SCRIPT_DIR}/gap-versions-channels.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results[versions-channels]=0
+        local rc=0
+        bash "$cmd" 2>&1 || rc=$?
+        if [[ $rc -ne 0 ]]; then
+            check_results[$step]=1
+            log_error "${name} step failed with exit code $rc"
         else
-            local exit_code=$?
-            check_results[versions-channels]=1
-            log_error "Versions & Channels analysis script failed with exit code $exit_code"
+            check_results[$step]=0
         fi
 
-        # Read status file
-        read_check_status "versions-channels"
-    fi
+        read_check_status "$step"
+    }
 
-    # Run OCM Version Gate analysis (Check #7 - can FAIL on validation findings)
-    if should_run_step "ocm-version-gate"; then
-        log_info ""
-        log_info "Running OCM Version Gate Gap Analysis..."
-        if python3 "${SCRIPT_DIR}/gap-ocm-version-gate.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["ocm-version-gate"]=0
-        else
-            local exit_code=$?
-            check_results["ocm-version-gate"]=1
-            log_error "OCM Version Gate analysis script failed with exit code $exit_code"
+    # Follow the aggregated workflow: run-workflow.py reads the workflow YAML,
+    # expands the rosa-gap-analysis-checks chain, and emits each check ref with
+    # the commands script named in its ref YAML, in order. --steps still selects
+    # a subset. Unlike a ci-operator `test:` phase (which stops on the first
+    # failure), this runner keeps going after a standard check fails; the final
+    # exit code is decided from check_results below.
+    run_all_steps() {
+        local plan ref cmd step rc=0
+        plan="$(python3 "${SCRIPT_DIR}/run-workflow.py" "${WORKFLOW_YAML}")" || rc=$?
+        if [[ $rc -ne 0 || -z "$plan" ]]; then
+            log_error "Failed to resolve workflow steps from ${WORKFLOW_YAML}; cannot run checks"
+            exit 1
         fi
+        while IFS=$'\t' read -r ref cmd; do
+            [[ -z "$ref" ]] && continue
+            step="${ref_to_step[$ref]:-}"
+            if [[ -z "$step" ]]; then
+                log_warning "No --steps alias for ref '${ref}'; skipping"
+                continue
+            fi
+            if should_run_step "$step"; then
+                run_check_step "$step" "$cmd"
+            fi
+        done <<< "$plan"
+    }
 
-        read_check_status "ocm-version-gate"
-    fi
-
-    # Run API Resources and CRD analysis (Check #9 - informational; missing snapshots are SKIP)
-    if should_run_step "api-resources"; then
-        log_info ""
-        log_info "Running API Resources and CRD Gap Analysis..."
-        if python3 "${SCRIPT_DIR}/gap-api-resources.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["api-resources"]=0
-        else
-            local exit_code=$?
-            check_results["api-resources"]=1
-            log_error "API Resources and CRD analysis script failed with exit code $exit_code"
-        fi
-
-        read_check_status "api-resources"
-    fi
-
-    # Run Critical Alerts analysis (Check #10 - informational; missing snapshots are SKIP)
-    if should_run_step "critical-alerts"; then
-        log_info ""
-        log_info "Running Critical Alerts Diff Validation..."
-        if python3 "${SCRIPT_DIR}/gap-critical-alerts.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["critical-alerts"]=0
-        else
-            local exit_code=$?
-            check_results["critical-alerts"]=1
-            log_error "Critical Alerts Diff Validation script failed with exit code $exit_code"
-        fi
-
-        read_check_status "critical-alerts"
-    fi
-
-    # Run Cluster Install analysis (Check #11 - informational; missing snapshots are SKIP)
-    if should_run_step "cluster-install"; then
-        log_info ""
-        log_info "Running Cluster Install and Delete Validation..."
-        if python3 "${SCRIPT_DIR}/gap-cluster-install.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["cluster-install"]=0
-        else
-            local exit_code=$?
-            check_results["cluster-install"]=1
-            log_error "Cluster Install and Delete Validation script failed with exit code $exit_code"
-        fi
-
-        read_check_status "cluster-install"
-    fi
-
-    # Run Target E2E Validation (Check #12 - informational; missing JUnit is SKIP)
-    if should_run_step "e2e-validation"; then
-        log_info ""
-        log_info "Running Target E2E Validation and alert monitoring..."
-        if python3 "${SCRIPT_DIR}/gap-e2e-validation.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["e2e-validation"]=0
-        else
-            local exit_code=$?
-            check_results["e2e-validation"]=1
-            log_error "Target E2E Validation and alert monitoring script failed with exit code $exit_code"
-        fi
-
-        read_check_status "e2e-validation"
-    fi
-
-    # Run Upgrade Validation from Y-1 to Y with E2E Tests (Check #13 - standard; missing JUnit is SKIP)
-    if should_run_step "upgrade-e2e"; then
-        log_info ""
-        log_info "Running Upgrade Validation from Y-1 to Y with E2E Tests..."
-        if python3 "${SCRIPT_DIR}/gap-upgrade-e2e.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["upgrade-e2e"]=0
-        else
-            local exit_code=$?
-            check_results["upgrade-e2e"]=1
-            log_error "Upgrade Validation from Y-1 to Y with E2E Tests script failed with exit code $exit_code"
-        fi
-
-        read_check_status "upgrade-e2e"
-    fi
-
-    # Run Feature Gates analysis (Info only - always passes)
-    # IMPORTANT: Feature Gates must always be the last check to execute, even if new checks are added in the future
-    if should_run_step "feature-gates"; then
-        log_info ""
-        log_info "Running Feature Gates Gap Analysis..."
-        if python3 "${SCRIPT_DIR}/gap-feature-gates.py" \
-            --baseline "$BASELINE" \
-            --target "$TARGET" \
-            --report-dir "$REPORT_DIR" \
-            $VERBOSE_FLAG 2>&1; then
-            check_results["feature-gates"]=0
-        else
-            local exit_code=$?
-            check_results["feature-gates"]=1
-            log_error "Feature Gates analysis script failed with exit code $exit_code"
-        fi
-
-        # Read status file
-        read_check_status "feature-gates"
-    fi
+    # Delegate all checks to their step-registry commands.sh.
+    setup_step_environment
+    run_all_steps
 
     # Calculate duration
     local end_time=$(date +%s)

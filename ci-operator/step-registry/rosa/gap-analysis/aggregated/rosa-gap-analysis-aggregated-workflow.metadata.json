@@ -1,0 +1,19 @@
+{
+	"path": "rosa/gap-analysis/aggregated/rosa-gap-analysis-aggregated-workflow.yaml",
+	"owners": {
+		"approvers": [
+			"tiwillia",
+			"dustman9000",
+			"bmeng",
+			"ravitri",
+			"rbhilare"
+		],
+		"reviewers": [
+			"tiwillia",
+			"dustman9000",
+			"bmeng",
+			"ravitri",
+			"rbhilare"
+		]
+	}
+}

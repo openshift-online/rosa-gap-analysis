@@ -46,7 +46,7 @@ Identifies changes between OpenShift versions through 13 validation checks:
 ```
 1. Specify versions (or auto-detect latest stable → candidate)
    ↓
-2. gap-all.sh runs 13 checks (policy, channels, Prow artifacts, E2E JUnit)
+2. gap-all.sh runs 13 checks, delegating each to its step-registry commands.sh (policy, channels, Prow artifacts, E2E JUnit)
    ↓
 3. Each script writes JSON + status-check-<n>.json
    ↓
@@ -55,7 +55,7 @@ Identifies changes between OpenShift versions through 13 validation checks:
 5. Review combined report; job exits 1 if checks 1–7 or 13 fail
 ```
 
-**Orchestration:** `gap-all.sh` sets `GAP_FULL_REPORT=1` (default), so per-check HTML is skipped in CI; combined HTML aggregates all sections. Missing individual JSON is surfaced via `status-check-*.json` fallbacks in the combined report.
+**Orchestration:** `gap-all.sh` is the nightly runner — it resolves versions, then runs each check by delegating to its step-registry `commands.sh` (the single source of check logic; `commands.sh` → `gap-*.py`), feature-gates last, and still fails on any standard check FAIL. It sets `GAP_FULL_REPORT=1` (default), so per-check HTML is skipped in CI; combined HTML aggregates all sections. Missing individual JSON is surfaced via `status-check-*.json` fallbacks in the combined report.
 
 ## Key Features
 

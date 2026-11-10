@@ -1,0 +1,27 @@
+ref:
+  as: rosa-gap-analysis-report
+  from: gap-analysis
+  grace_period: 1m
+  timeout: 10m
+  commands: rosa-gap-analysis-report-commands.sh
+  resources:
+    requests:
+      cpu: 100m
+      memory: 300Mi
+  env:
+  - name: OPENSHIFT_VERSION
+    default: ""
+    documentation: Single version (fallback if gap-versions.env is absent).
+  - name: BASELINE
+    default: ""
+    documentation: Explicit baseline (fallback if gap-versions.env is absent).
+  - name: TARGET
+    default: ""
+    documentation: Explicit target (fallback if gap-versions.env is absent).
+  documentation: |-
+    Aggregates the per-check reports in ${SHARED_DIR}/gap-analysis-reports into a
+    single combined HTML/JSON report via generate-combined-report.py and copies all
+    reports to ${ARTIFACT_DIR}. Intended as a post step. It does NOT determine the
+    job verdict (each check ref already fails its own step on a standard-check FAIL
+    or execution error); combined-report generation failure is logged but does not
+    fail the job. Requires the gap-analysis image.

@@ -1,0 +1,19 @@
+{
+	"path": "rosa/gap-analysis/aws-sts/rosa-gap-analysis-aws-sts-ref.yaml",
+	"owners": {
+		"approvers": [
+			"tiwillia",
+			"dustman9000",
+			"bmeng",
+			"ravitri",
+			"rbhilare"
+		],
+		"reviewers": [
+			"tiwillia",
+			"dustman9000",
+			"bmeng",
+			"ravitri",
+			"rbhilare"
+		]
+	}
+}

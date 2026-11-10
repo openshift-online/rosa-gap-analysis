@@ -172,6 +172,7 @@ See [Validation Checks](docs/validation-checks.md#version-resolution) for detail
 - [🚀 Getting Started](docs/getting-started.md) - Installation and basic usage
 - [⚙️ Configuration](docs/configuration.md) - CLI arguments, environment variables, version resolution
 - [🔧 Development](docs/development.md) - Contributing and customization
+- [🧩 Step-Registry Workflows](docs/step-registry-workflow.md) - ci-operator step registry: the 2 gap-analysis workflows (aggregated, independent) + step contracts (GA readiness is a standalone individual-only step, not in CI)
 
 **Additional Resources:**
 - [📊 Report Documentation](docs/reports.md) - Report formats and viewing
@@ -201,6 +202,8 @@ gap-analysis/
 ├── reports/                  # Generated reports (default location)
 ├── skills/                   # Claude AI skills
 ├── docs/                     # Documentation
+├── ci-operator/              # ci-operator step registry (refs, chain, 2 workflows)
+│   └── step-registry/rosa/gap-analysis/
 └── ci/                       # CI configuration and container image
 ```
 

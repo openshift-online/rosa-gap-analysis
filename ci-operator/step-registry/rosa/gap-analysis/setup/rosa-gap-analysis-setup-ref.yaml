@@ -1,0 +1,17 @@
+ref:
+  as: rosa-gap-analysis-setup
+  from: gap-analysis
+  grace_period: 1m
+  timeout: 10m
+  commands: rosa-gap-analysis-setup-commands.sh
+  resources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+  documentation: |-
+    Environment setup and prerequisite validation for the rosa-gap-analysis
+    workflow. Verifies the required tooling is present in the image (python3, jq),
+    warns about optional CLIs (oc, ocm, rosa), and initializes the shared reports
+    directory (${SHARED_DIR}/gap-analysis-reports), clearing any stale per-run
+    state so reports from a previous run cannot leak in. Intended as the first pre
+    step. Requires the gap-analysis image.

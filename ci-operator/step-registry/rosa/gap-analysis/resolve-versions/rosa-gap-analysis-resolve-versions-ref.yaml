@@ -1,0 +1,31 @@
+ref:
+  as: rosa-gap-analysis-resolve-versions
+  from: gap-analysis
+  grace_period: 1m
+  timeout: 10m
+  commands: rosa-gap-analysis-resolve-versions-commands.sh
+  resources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+  env:
+  - name: OPENSHIFT_VERSION
+    default: ""
+    documentation: |-
+      Single version to analyze (e.g. 4.22 or 5.0). Auto-resolves BASELINE and
+      TARGET. Takes precedence over BASELINE/TARGET.
+  - name: BASELINE
+    default: ""
+    documentation: Explicit baseline version (used with TARGET when OPENSHIFT_VERSION is unset).
+  - name: TARGET
+    default: ""
+    documentation: Explicit target version (used with BASELINE when OPENSHIFT_VERSION is unset).
+  documentation: |-
+    Resolves the rosa-gap-analysis BASELINE and TARGET versions once and writes
+    them to ${SHARED_DIR}/gap-versions.env so every downstream gap-analysis check
+    and the report step compare the same versions. Precedence: OPENSHIFT_VERSION >
+    BASELINE+TARGET > auto-detect (latest stable -> latest candidate, including the
+    4.x -> 5.x special mapping). If the version cannot be resolved or only a single
+    z-stream exists, writes GAP_SKIP=1 so the workflow skips gracefully.
+    Values are written with printf %q so the file is safe to source.
+    Requires the gap-analysis image (scripts/lib/openshift-releases.sh).

@@ -1,0 +1,16 @@
+ref:
+  as: rosa-gap-analysis-cleanup
+  from: gap-analysis
+  grace_period: 1m
+  timeout: 10m
+  commands: rosa-gap-analysis-cleanup-commands.sh
+  resources:
+    requests:
+      cpu: 100m
+      memory: 200Mi
+  documentation: |-
+    Cleanup and resource management for the rosa-gap-analysis workflow. Removes
+    scratch state the steps staged in ${SHARED_DIR} (gap-versions.env, ocm-token)
+    so secrets/intermediate files are not carried further, and removes analyzer
+    temp directories (ocp-crs-*, mcc-checkout-*) from the pod. Best-effort: always
+    exits 0 so cleanup never fails the job. Intended as the final post step.

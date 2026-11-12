@@ -892,11 +892,11 @@ create_pr() {
     local prow_job_url="N/A"
     local html_report_url="N/A"
     if [ -n "${prow_job_id}" ] && [ -n "${prow_job_name}" ]; then
-        prow_job_url="https://prow.ci.openshift.org/view/gs/test-platform-results/logs/${prow_job_name}/${prow_job_id}"
+        prow_job_url="https://prow.ci.openshift.org/view/gs/test-platform-results-public/logs/${prow_job_name}/${prow_job_id}"
         if [ -n "${html_report_filename}" ]; then
-            html_report_url="https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/${prow_job_name}/${prow_job_id}/artifacts/test/artifacts/rosa-gap-analysis-reports/${html_report_filename}"
+            html_report_url="https://gcs.ci.openshift.org/gcs/test-platform-results-public/logs/${prow_job_name}/${prow_job_id}/artifacts/test/artifacts/rosa-gap-analysis-reports/${html_report_filename}"
         else
-            html_report_url="https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs/${prow_job_name}/${prow_job_id}/artifacts/test/artifacts/rosa-gap-analysis-reports/"
+            html_report_url="https://gcs.ci.openshift.org/gcs/test-platform-results-public/logs/${prow_job_name}/${prow_job_id}/artifacts/test/artifacts/rosa-gap-analysis-reports/"
         fi
     elif [ -n "${PROW_JOB_URL}" ]; then
         prow_job_url="${PROW_JOB_URL}"

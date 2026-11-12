@@ -12,8 +12,76 @@ from common import log_info, log_error
 SIPPY_API = "https://sippy.dptools.openshift.org/api/releases"
 ACCEPTED_STREAMS_API = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted"
 RELEASE_STREAM_BASE = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestream"
-STABLE_STREAM = "4-stable"
-DEV_PREVIEW_STREAM = "4-dev-preview"
+
+# Number of versions included in a resolution-failure diagnostic
+_DIAGNOSTIC_SAMPLE_SIZE = 10
+
+
+def stable_stream_for_version(version):
+    """
+    Return the accepted stable stream holding releases for this version's major.
+
+    The accepted-streams API publishes one stable stream per MAJOR version
+    ("4-stable", "5-stable"), so hardcoding "4-stable" makes every 5.x lookup
+    read an unrelated stream and report that no versions exist.
+
+    Args:
+        version: Version or version line (e.g., "5.0", "4.21.11")
+
+    Returns:
+        str: Stream name (e.g., "5-stable")
+    """
+    return f"{version.split('.')[0]}-stable"
+
+
+def dev_preview_stream_for_version(version):
+    """
+    Return the accepted dev-preview stream for this version's major.
+
+    Args:
+        version: Version or version line (e.g., "5.1", "4.23.0-ec.2")
+
+    Returns:
+        str: Stream name (e.g., "5-dev-preview")
+    """
+    return f"{version.split('.')[0]}-dev-preview"
+
+
+def is_prerelease_version(version):
+    """Return True for RC/EC builds, which X-stable also carries but are not stable releases."""
+    return '-rc.' in version or '-ec.' in version
+
+
+def log_stream_lookup_failure(stream, version_line, streams):
+    """
+    Log bounded, non-sensitive diagnostics when a stream lookup finds no match.
+
+    Prints the stream that was selected, the public API it came from, and at most
+    the newest _DIAGNOSTIC_SAMPLE_SIZE versions that stream does contain, so a CI
+    artifact alone shows why resolution failed. Never logs the full API response.
+
+    Args:
+        stream: Stream name that was searched (e.g., "5-stable")
+        version_line: Version line that was searched for (e.g., "5.0")
+        streams: Accepted streams mapping returned by fetch_accepted_streams()
+    """
+    if not isinstance(streams, dict):
+        log_info(f"Could not parse the accepted streams response from {ACCEPTED_STREAMS_API}")
+        return
+
+    if stream not in streams:
+        available = sorted(
+            name for name in streams
+            if name.endswith('-stable') or name.endswith('-dev-preview')
+        )
+        log_info(f"Stream {stream} is not present in {ACCEPTED_STREAMS_API} "
+                 f"(available: {', '.join(available) or 'none'})")
+        return
+
+    versions = streams.get(stream) or []
+    sample = ', '.join(versions[:_DIAGNOSTIC_SAMPLE_SIZE]) or 'none'
+    log_info(f"Searched {stream} from {ACCEPTED_STREAMS_API} for {version_line}.x")
+    log_info(f"Stream {stream} holds {len(versions)} accepted version(s); newest: {sample}")
 
 
 def fetch_sippy_ga_dates():
@@ -78,18 +146,25 @@ def get_latest_stable_version(ga_version=None):
 
     # Fetch accepted streams (single API call)
     streams = fetch_accepted_streams()
-    stable_versions = streams.get(STABLE_STREAM, [])
+
+    # Select the stable stream for this version's major (4.21 → 4-stable, 5.0 → 5-stable)
+    stable_stream = stable_stream_for_version(ga_version)
+    stable_versions = streams.get(stable_stream) or []
 
     if not stable_versions:
-        log_error(f"No versions found in {STABLE_STREAM} accepted stream")
+        log_error(f"No versions found in {stable_stream} accepted stream")
+        log_stream_lookup_failure(stable_stream, ga_version, streams)
         sys.exit(1)
 
-    # Filter to match GA version line (e.g., 4.21.x)
+    # Filter to match GA version line (e.g., 4.21.x), excluding RC/EC builds that
+    # X-stable also carries (e.g. 5.0.0-rc.8) but which are not stable releases.
     # Versions are already sorted newest first in the accepted API
-    matching_versions = [v for v in stable_versions if v.startswith(f"{ga_version}.")]
+    matching_versions = [v for v in stable_versions
+                         if v.startswith(f"{ga_version}.") and not is_prerelease_version(v)]
 
     if not matching_versions:
         log_error(f"No stable versions found matching GA version line {ga_version}.x")
+        log_stream_lookup_failure(stable_stream, ga_version, streams)
         sys.exit(1)
 
     return matching_versions[0]
@@ -114,9 +189,8 @@ def get_latest_candidate_version(dev_version=None):
         dev_minor = int(parts[1]) + 1
         dev_version = f"{parts[0]}.{dev_minor}"
 
-    major = dev_version.split('.')[0]
-    stable_stream = f"{major}-stable"
-    dev_preview_stream = f"{major}-dev-preview"
+    stable_stream = stable_stream_for_version(dev_version)
+    dev_preview_stream = dev_preview_stream_for_version(dev_version)
 
     # Fetch accepted streams (single API call)
     streams = fetch_accepted_streams()
@@ -138,6 +212,8 @@ def get_latest_candidate_version(dev_version=None):
     # No RC or EC found
     log_error(f"No candidate version found for {dev_version} "
               f"(checked RC in {stable_stream} and EC in {dev_preview_stream})")
+    log_stream_lookup_failure(stable_stream, dev_version, streams)
+    log_stream_lookup_failure(dev_preview_stream, dev_version, streams)
     sys.exit(1)
 
 
@@ -235,13 +311,19 @@ def get_previous_z_stream_version(minor_version):
         SystemExit: If no stable versions found for the minor version line
     """
     streams = fetch_accepted_streams()
-    stable_versions = streams.get(STABLE_STREAM, [])
 
-    # Filter to versions matching this minor version line
-    matching_versions = [v for v in stable_versions if v.startswith(f"{minor_version}.")]
+    # Select the stable stream for this version's major (4.21 → 4-stable, 5.0 → 5-stable)
+    stable_stream = stable_stream_for_version(minor_version)
+    stable_versions = streams.get(stable_stream) or []
+
+    # Filter to versions matching this minor version line. RC/EC builds also live
+    # in X-stable but are not z-streams, so they are excluded from the history.
+    matching_versions = [v for v in stable_versions
+                         if v.startswith(f"{minor_version}.") and not is_prerelease_version(v)]
 
     if not matching_versions:
         log_error(f"No stable versions found for {minor_version}.x")
+        log_stream_lookup_failure(stable_stream, minor_version, streams)
         sys.exit(1)
 
     # Check if we have at least 2 versions
@@ -270,10 +352,9 @@ def get_latest_version_baseline_priority(minor_version):
     """
     streams = fetch_accepted_streams()
 
-    # Extract major version from minor_version (4.22 → 4, 5.0 → 5)
-    major_version = minor_version.split('.')[0]
-    stable_stream = f"{major_version}-stable"
-    dev_preview_stream = f"{major_version}-dev-preview"
+    # Streams are per-major (4.22 → 4-stable, 5.0 → 5-stable)
+    stable_stream = stable_stream_for_version(minor_version)
+    dev_preview_stream = dev_preview_stream_for_version(minor_version)
     nightly_stream = f"{minor_version}.0-0.nightly"
     ci_stream = f"{minor_version}.0-0.ci"
 
@@ -286,7 +367,7 @@ def get_latest_version_baseline_priority(minor_version):
     # Priority 1: Stable version (e.g., 4.22.5, 5.0.5)
     stable_matches = [v for v in stable_versions
                      if v.startswith(f"{minor_version}.")
-                     and '-rc.' not in v and '-ec.' not in v]
+                     and not is_prerelease_version(v)]
     if stable_matches:
         return stable_matches[0]
 
@@ -309,6 +390,8 @@ def get_latest_version_baseline_priority(minor_version):
         return nightly_versions[0]
 
     log_error(f"No version found for {minor_version} (checked stable, RC, EC, CI, nightly)")
+    for stream in (stable_stream, dev_preview_stream, ci_stream, nightly_stream):
+        log_stream_lookup_failure(stream, minor_version, streams)
     sys.exit(1)
 
 
@@ -328,10 +411,9 @@ def get_latest_version_target_priority(minor_version):
     """
     streams = fetch_accepted_streams()
 
-    # Extract major version from minor_version (4.22 → 4, 5.0 → 5)
-    major_version = minor_version.split('.')[0]
-    stable_stream = f"{major_version}-stable"
-    dev_preview_stream = f"{major_version}-dev-preview"
+    # Streams are per-major (4.22 → 4-stable, 5.0 → 5-stable)
+    stable_stream = stable_stream_for_version(minor_version)
+    dev_preview_stream = dev_preview_stream_for_version(minor_version)
     nightly_stream = f"{minor_version}.0-0.nightly"
     ci_stream = f"{minor_version}.0-0.ci"
 
@@ -360,6 +442,8 @@ def get_latest_version_target_priority(minor_version):
         return nightly_versions[0]
 
     log_error(f"No version found for {minor_version} (checked candidate, CI, nightly)")
+    for stream in (stable_stream, dev_preview_stream, ci_stream, nightly_stream):
+        log_stream_lookup_failure(stream, minor_version, streams)
     sys.exit(1)
 
 
@@ -618,7 +702,8 @@ def resolve_baseline_version(cli_arg=None, env_var=None):
     Resolve baseline version with precedence: CLI > ENV > Auto-detect.
 
     If CLI/ENV value is a minor version (e.g., "4.21"), it will be resolved to the
-    latest patch version from 4-stable stream (e.g., "4.21.7").
+    latest stable patch from that major's stable stream (e.g., "4.21" → "4.21.7" from 4-stable,
+    "5.0" → "5.0.1" from 5-stable).
 
     Args:
         cli_arg: Version from CLI argument (--baseline)
@@ -659,7 +744,7 @@ def resolve_target_version(cli_arg=None, env_var=None):
     Resolve target version with precedence: CLI > ENV > Auto-detect.
 
     If CLI/ENV value is a minor version (e.g., "4.22"), it will be resolved to the
-    latest candidate (RC from 4-stable or EC from 4-dev-preview).
+    latest candidate (RC from {major}-stable or EC from {major}-dev-preview).
 
     Special keywords: NIGHTLY, CANDIDATE
 

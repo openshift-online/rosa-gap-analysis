@@ -13,11 +13,79 @@ readonly SIPPY_API="https://sippy.dptools.openshift.org/api/releases"
 readonly ACCEPTED_STREAMS_API="https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted"
 # RELEASE_STREAM_BASE still needed for pullspec/nightly functions (accepted API doesn't provide pullspecs)
 readonly RELEASE_STREAM_BASE="https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestream"
-readonly STABLE_STREAM="4-stable"
-readonly DEV_PREVIEW_STREAM="4-dev-preview"
 
 # Cache for accepted streams (to avoid multiple API calls)
 _ACCEPTED_STREAMS_CACHE=""
+
+# Versions listed in a resolution-failure diagnostic
+# (mirrors _DIAGNOSTIC_SAMPLE_SIZE in openshift_releases.py)
+readonly _DIAGNOSTIC_SAMPLE_SIZE=10
+
+# jq predicate dropping RC/EC pre-releases. X-stable carries that major's RC
+# builds alongside its stable releases, so every "stable"/z-stream filter needs
+# it (mirrors is_prerelease_version() in openshift_releases.py).
+readonly _JQ_NOT_PRERELEASE='((contains("-rc.") or contains("-ec.")) | not)'
+
+# The accepted-streams API publishes one stable and one dev-preview stream per
+# MAJOR version (4-stable, 5-stable, 4-dev-preview, 5-dev-preview). Always derive
+# the stream name from the version being resolved — hardcoding "4-stable" makes
+# every 5.x resolution read an unrelated stream and report "no versions found".
+# Usage: stable_stream_for_version "5.0" → "5-stable"
+stable_stream_for_version() {
+    local version="$1"
+    echo "${version%%.*}-stable"
+}
+
+# Usage: dev_preview_stream_for_version "5.1" → "5-dev-preview"
+dev_preview_stream_for_version() {
+    local version="$1"
+    echo "${version%%.*}-dev-preview"
+}
+
+# Log bounded, non-sensitive diagnostics when a stream lookup finds no match.
+# Prints the stream that was selected, the public API it came from, and at most
+# _DIAGNOSTIC_SAMPLE_SIZE of the newest versions that stream does contain, so a
+# CI artifact alone shows why resolution failed. Never prints the full API response.
+# Call it once per stream that was consulted.
+# Usage: _log_stream_lookup_failure <stream> <version-line> <streams-json>
+_log_stream_lookup_failure() {
+    local stream="$1"
+    local version_line="$2"
+    local streams="$3"
+    local has_stream
+    local count
+    local sample
+    local available_streams
+
+    has_stream=$(echo "$streams" | jq -r --arg s "$stream" 'has($s)' 2>/dev/null)
+
+    if [[ -z "$has_stream" ]]; then
+        _log_diagnostic "Could not parse the accepted streams response from ${ACCEPTED_STREAMS_API}"
+        return 0
+    fi
+
+    if [[ "$has_stream" != "true" ]]; then
+        available_streams=$(echo "$streams" | \
+            jq -r 'keys | map(select(endswith("-stable") or endswith("-dev-preview"))) | join(", ")' 2>/dev/null)
+        _log_diagnostic "Stream ${stream} is not present in ${ACCEPTED_STREAMS_API} (available: ${available_streams:-none})"
+        return 0
+    fi
+
+    count=$(echo "$streams" | jq -r --arg s "$stream" '.[$s] | length' 2>/dev/null)
+    sample=$(echo "$streams" | \
+        jq -r --arg s "$stream" --argjson n "$_DIAGNOSTIC_SAMPLE_SIZE" '.[$s][0:$n] | join(", ")' 2>/dev/null)
+    _log_diagnostic "Searched ${stream} from ${ACCEPTED_STREAMS_API} for ${version_line}.x"
+    _log_diagnostic "Stream ${stream} holds ${count:-0} accepted version(s); newest: ${sample:-none}"
+}
+
+# Emit a diagnostic line through log_info when available, stderr otherwise.
+_log_diagnostic() {
+    if command -v log_info &>/dev/null; then
+        log_info "$1"
+    else
+        echo "Info: $1" >&2
+    fi
+}
 
 # Helper function: curl with retry logic and improved error reporting
 # Provides defense-in-depth with two retry layers:
@@ -242,10 +310,10 @@ get_latest_dev_version() {
     # Get latest GA version first
     ga_version=$(get_latest_ga_version) || return 1
 
-    # Calculate expected dev version (GA + 1)
+    # Calculate expected dev version (GA + 1), keeping the GA major (5.0 → 5.1)
     ga_minor=$(extract_minor_version "$ga_version")
     expected_dev_minor=$((ga_minor + 1))
-    expected_dev_version="4.${expected_dev_minor}"
+    expected_dev_version="${ga_version%%.*}.${expected_dev_minor}"
 
     # Get all available releases
     all_releases=$(_curl_with_retry "${SIPPY_API}" | \
@@ -275,7 +343,7 @@ get_latest_dev_version() {
 }
 
 # Get the latest candidate (RC or EC) version for GA+1 from accepted streams
-# First checks 4-stable for RC version, falls back to 4-dev-preview for EC version
+# First checks {major}-stable for RC version, falls back to {major}-dev-preview for EC version
 # Usage: get_latest_candidate_version
 # Returns: Latest candidate version (e.g., "4.22.0-rc.0" or "4.22.0-ec.5") or empty string on failure
 # Exit: 0 on success, 1 on failure
@@ -288,43 +356,53 @@ get_latest_candidate_version() {
     # Get GA version first
     ga_version=$(get_latest_ga_version) || return 1
 
-    # Calculate dev version (GA + 1)
+    # Calculate dev version (GA + 1), keeping the GA major (4.21 → 4.22, 5.0 → 5.1)
+    local ga_major
     local ga_minor
+    ga_major=$(echo "$ga_version" | cut -d. -f1)
     ga_minor=$(echo "$ga_version" | cut -d. -f2)
     local dev_minor=$((ga_minor + 1))
-    dev_version="4.${dev_minor}"
+    dev_version="${ga_major}.${dev_minor}"
+
+    # Streams are per-major: resolve 4.x against 4-stable, 5.x against 5-stable
+    local stable_stream
+    local dev_preview_stream
+    stable_stream=$(stable_stream_for_version "$dev_version")
+    dev_preview_stream=$(dev_preview_stream_for_version "$dev_version")
 
     # Fetch accepted streams
     streams=$(fetch_accepted_streams) || return 1
 
-    # Priority 1: Check 4-stable for RC version (e.g., 4.22.0-rc.*)
+    # Priority 1: Check {major}-stable for RC version (e.g., 4.22.0-rc.*, 5.1.0-rc.*)
     # Versions are already sorted newest first
     latest_candidate=$(echo "$streams" | \
-        jq -r --arg stream "$STABLE_STREAM" --arg dev "$dev_version" '.[$stream][] | select(startswith($dev + ".0-rc."))' 2>/dev/null | head -1)
+        jq -r --arg stream "$stable_stream" --arg dev "$dev_version" '.[$stream][]? | select(startswith($dev + ".0-rc."))' 2>/dev/null | head -1)
 
     if [[ -n "$latest_candidate" ]] && [[ "$latest_candidate" != "null" ]]; then
         if command -v log_info &>/dev/null; then
-            log_info "Found RC version in ${STABLE_STREAM}: $latest_candidate"
+            log_info "Found RC version in ${stable_stream}: $latest_candidate"
         fi
         echo "$latest_candidate"
         return 0
     fi
 
-    # Priority 2: No RC in stable, check 4-dev-preview for EC version (e.g., 4.22.0-ec.*)
+    # Priority 2: No RC in stable, check {major}-dev-preview for EC version (e.g., 4.22.0-ec.*)
     latest_candidate=$(echo "$streams" | \
-        jq -r --arg stream "$DEV_PREVIEW_STREAM" --arg dev "$dev_version" '.[$stream][] | select(startswith($dev + ".0-ec."))' 2>/dev/null | head -1)
+        jq -r --arg stream "$dev_preview_stream" --arg dev "$dev_version" '.[$stream][]? | select(startswith($dev + ".0-ec."))' 2>/dev/null | head -1)
 
     if [[ -z "$latest_candidate" ]] || [[ "$latest_candidate" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch candidate version for ${dev_version}.x (no RC in ${STABLE_STREAM}, no EC in ${DEV_PREVIEW_STREAM})"
+            log_error "Failed to fetch candidate version for ${dev_version}.x (no RC in ${stable_stream}, no EC in ${dev_preview_stream})"
         else
             echo "Error: Failed to fetch candidate version for ${dev_version}.x" >&2
         fi
+        _log_stream_lookup_failure "$stable_stream" "$dev_version" "$streams"
+        _log_stream_lookup_failure "$dev_preview_stream" "$dev_version" "$streams"
         return 1
     fi
 
     if command -v log_info &>/dev/null; then
-        log_info "Found EC version in ${DEV_PREVIEW_STREAM}: $latest_candidate"
+        log_info "Found EC version in ${dev_preview_stream}: $latest_candidate"
     fi
 
     echo "$latest_candidate"
@@ -333,31 +411,40 @@ get_latest_candidate_version() {
 
 # Get the latest stable version from accepted streams
 # Ensures stable version belongs to GA version
-# Usage: get_latest_stable_version
+# Usage: get_latest_stable_version [version_line]   # defaults to the latest GA line
 # Returns: Latest stable version (e.g., "4.21.11") or empty string on failure
 # Exit: 0 on success, 1 on failure
 get_latest_stable_version() {
-    local ga_version
+    local ga_version="${1:-}"
     local streams
+    local stable_stream
     local latest_stable
 
-    # Get GA version first (e.g., "4.21")
-    ga_version=$(get_latest_ga_version) || return 1
+    # Default to the latest GA version (e.g., "4.21") when no line is requested
+    if [[ -z "$ga_version" ]]; then
+        ga_version=$(get_latest_ga_version) || return 1
+    fi
 
     # Fetch accepted streams
     streams=$(fetch_accepted_streams) || return 1
 
-    # Extract 4-stable array and filter by GA version line (e.g., 4.21.x)
+    # Select the stable stream for this version's major (4.21 → 4-stable, 5.0 → 5-stable)
+    stable_stream=$(stable_stream_for_version "$ga_version")
+
+    # Filter the stable stream by GA version line (e.g., 4.21.x) and drop pre-releases:
+    # X-stable also carries RC builds (5.0.0-rc.8), which are not stable releases.
     # Versions are already sorted newest first in the accepted API
     latest_stable=$(echo "$streams" | \
-        jq -r --arg stream "$STABLE_STREAM" --arg ga "$ga_version" '.[$stream][] | select(startswith($ga + "."))' 2>/dev/null | head -1)
+        jq -r --arg stream "$stable_stream" --arg ga "$ga_version" \
+        '.[$stream][]? | select(startswith($ga + ".") and '"$_JQ_NOT_PRERELEASE"')' 2>/dev/null | head -1)
 
     if [[ -z "$latest_stable" ]] || [[ "$latest_stable" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} accepted stream"
+            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${stable_stream} accepted stream"
         else
-            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} accepted stream" >&2
+            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${stable_stream} accepted stream" >&2
         fi
+        _log_stream_lookup_failure "$stable_stream" "$ga_version" "$streams"
         return 1
     fi
 
@@ -378,26 +465,28 @@ get_latest_stable_version() {
 get_latest_stable_pullspec() {
     local api_url
     local ga_version
+    local stable_stream
     local stable_version
     local pullspec
 
     # Get GA version first (e.g., "4.21")
     ga_version=$(get_latest_ga_version) || return 1
 
-    # Build API URL for stable stream (amd64)
-    api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
+    # Build API URL for this major's stable stream (amd64)
+    stable_stream=$(stable_stream_for_version "$ga_version")
+    api_url="${RELEASE_STREAM_BASE}/${stable_stream}/tags"
 
     # Fetch tags and filter to only those matching GA version line (e.g., 4.21.x)
     # Get both name and pullspec for the first matching tag
     local result
     result=$(_curl_with_retry "$api_url" | \
-        jq -r --arg ga "$ga_version" '.tags[] | select(.name | startswith($ga + ".")) | {name: .name, pullSpec: .pullSpec} | @json' 2>/dev/null | head -1)
+        jq -r --arg ga "$ga_version" '.tags[] | select(.name | startswith($ga + ".") and '"$_JQ_NOT_PRERELEASE"') | {name: .name, pullSpec: .pullSpec} | @json' 2>/dev/null | head -1)
 
     if [[ -z "$result" ]] || [[ "$result" == "null" ]]; then
         if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream"
+            log_error "Failed to fetch latest stable version for ${ga_version}.x from ${stable_stream} stream"
         else
-            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${STABLE_STREAM} stream" >&2
+            echo "Error: Failed to fetch latest stable version for ${ga_version}.x from ${stable_stream} stream" >&2
         fi
         return 1
     fi
@@ -424,7 +513,7 @@ get_latest_stable_pullspec() {
 }
 
 # Get the latest candidate (RC or EC) version pullspec
-# First checks 4-stable for RC, falls back to 4-dev-preview for EC
+# First checks {major}-stable for RC, falls back to {major}-dev-preview for EC
 # Usage: get_latest_candidate_pullspec
 # Returns: Pullspec for latest candidate version (e.g., "quay.io/openshift-release-dev/ocp-release:4.22.0-rc.1-x86_64" or "registry.ci.openshift.org/ocp/release:4.22.0-ec.3")
 # Exit: 0 on success, 1 on failure
@@ -439,14 +528,16 @@ get_latest_candidate_pullspec() {
     # Get GA version first
     ga_version=$(get_latest_ga_version) || return 1
 
-    # Calculate dev version (GA + 1)
+    # Calculate dev version (GA + 1), keeping the GA major (4.21 → 4.22, 5.0 → 5.1)
+    local ga_major
     local ga_minor
+    ga_major=$(echo "$ga_version" | cut -d. -f1)
     ga_minor=$(echo "$ga_version" | cut -d. -f2)
     local dev_minor=$((ga_minor + 1))
-    dev_version="4.${dev_minor}"
+    dev_version="${ga_major}.${dev_minor}"
 
-    # Step 1: Check 4-stable stream for RC version
-    stable_api_url="${RELEASE_STREAM_BASE}/${STABLE_STREAM}/tags"
+    # Step 1: Check {major}-stable stream for RC version
+    stable_api_url="${RELEASE_STREAM_BASE}/$(stable_stream_for_version "$dev_version")/tags"
 
     # Get candidate version and pullspec from stable stream
     local stable_result
@@ -463,8 +554,8 @@ get_latest_candidate_pullspec() {
         fi
     fi
 
-    # Step 2: No RC in stable, check 4-dev-preview stream for EC version
-    dev_api_url="${RELEASE_STREAM_BASE}/${DEV_PREVIEW_STREAM}/tags"
+    # Step 2: No RC in stable, check {major}-dev-preview stream for EC version
+    dev_api_url="${RELEASE_STREAM_BASE}/$(dev_preview_stream_for_version "$dev_version")/tags"
 
     # Get candidate version and pullspec from dev-preview stream
     local dev_result
@@ -618,6 +709,7 @@ get_all_minor_versions_from_accepted_streams() {
 get_previous_z_stream_version() {
     local minor_version="$1"
     local streams
+    local stable_stream
     local versions
     local version_count
     local previous_version
@@ -634,10 +726,14 @@ get_previous_z_stream_version() {
     # Fetch accepted streams
     streams=$(fetch_accepted_streams) || return 1
 
-    # Get all versions for this minor version line from 4-stable
+    # Get all versions for this minor version line from the major's stable stream
+    # (4.21 → 4-stable, 5.0 → 5-stable). RC/EC builds also live in X-stable but
+    # are not z-streams, so they are excluded from the z-stream history.
     # Versions are already sorted newest first
+    stable_stream=$(stable_stream_for_version "$minor_version")
     versions=$(echo "$streams" | \
-        jq -r --arg minor "$minor_version" '.["4-stable"][] | select(startswith($minor + "."))' 2>/dev/null)
+        jq -r --arg stream "$stable_stream" --arg minor "$minor_version" \
+        '.[$stream][]? | select(startswith($minor + ".") and '"$_JQ_NOT_PRERELEASE"')' 2>/dev/null)
 
     if [[ -z "$versions" ]]; then
         if command -v log_error &>/dev/null; then
@@ -645,6 +741,7 @@ get_previous_z_stream_version() {
         else
             echo "Error: No stable versions found for ${minor_version}.x" >&2
         fi
+        _log_stream_lookup_failure "$stable_stream" "$minor_version" "$streams"
         return 1
     fi
 
@@ -691,7 +788,6 @@ get_previous_z_stream_version() {
 get_latest_version_baseline_priority() {
     local minor_version="$1"
     local streams
-    local major_version
     local stable_stream
     local dev_preview_stream
     local nightly_stream
@@ -714,16 +810,15 @@ get_latest_version_baseline_priority() {
     # Fetch accepted streams
     streams=$(fetch_accepted_streams) || return 1
 
-    # Extract major version (4.22 → 4, 5.0 → 5)
-    major_version=$(echo "$minor_version" | cut -d'.' -f1)
-    stable_stream="${major_version}-stable"
-    dev_preview_stream="${major_version}-dev-preview"
+    # Streams are per-major (4.22 → 4-stable, 5.0 → 5-stable)
+    stable_stream=$(stable_stream_for_version "$minor_version")
+    dev_preview_stream=$(dev_preview_stream_for_version "$minor_version")
     nightly_stream="${minor_version}.0-0.nightly"
     ci_stream="${minor_version}.0-0.ci"
 
     # Priority 1: Stable version (e.g., 4.22.5, 5.0.5)
     stable_version=$(echo "$streams" | \
-        jq -r --arg stream "$stable_stream" --arg minor "$minor_version" '.[$stream][]? | select(startswith($minor + ".") and (contains("-rc.") or contains("-ec.") | not))' 2>/dev/null | head -1)
+        jq -r --arg stream "$stable_stream" --arg minor "$minor_version" '.[$stream][]? | select(startswith($minor + ".") and '"$_JQ_NOT_PRERELEASE"')' 2>/dev/null | head -1)
 
     if [[ -n "$stable_version" ]] && [[ "$stable_version" != "null" ]]; then
         echo "$stable_version"
@@ -769,6 +864,10 @@ get_latest_version_baseline_priority() {
     else
         echo "Error: No version found for ${minor_version}" >&2
     fi
+    _log_stream_lookup_failure "$stable_stream" "$minor_version" "$streams"
+    _log_stream_lookup_failure "$dev_preview_stream" "$minor_version" "$streams"
+    _log_stream_lookup_failure "$ci_stream" "$minor_version" "$streams"
+    _log_stream_lookup_failure "$nightly_stream" "$minor_version" "$streams"
     return 1
 }
 
@@ -780,7 +879,6 @@ get_latest_version_baseline_priority() {
 get_latest_version_target_priority() {
     local minor_version="$1"
     local streams
-    local major_version
     local stable_stream
     local dev_preview_stream
     local nightly_stream
@@ -802,10 +900,9 @@ get_latest_version_target_priority() {
     # Fetch accepted streams
     streams=$(fetch_accepted_streams) || return 1
 
-    # Extract major version (4.22 → 4, 5.0 → 5)
-    major_version=$(echo "$minor_version" | cut -d'.' -f1)
-    stable_stream="${major_version}-stable"
-    dev_preview_stream="${major_version}-dev-preview"
+    # Streams are per-major (4.22 → 4-stable, 5.0 → 5-stable)
+    stable_stream=$(stable_stream_for_version "$minor_version")
+    dev_preview_stream=$(dev_preview_stream_for_version "$minor_version")
     nightly_stream="${minor_version}.0-0.nightly"
     ci_stream="${minor_version}.0-0.ci"
 
@@ -848,6 +945,10 @@ get_latest_version_target_priority() {
     else
         echo "Error: No version found for ${minor_version}" >&2
     fi
+    _log_stream_lookup_failure "$stable_stream" "$minor_version" "$streams"
+    _log_stream_lookup_failure "$dev_preview_stream" "$minor_version" "$streams"
+    _log_stream_lookup_failure "$ci_stream" "$minor_version" "$streams"
+    _log_stream_lookup_failure "$nightly_stream" "$minor_version" "$streams"
     return 1
 }
 
@@ -975,10 +1076,9 @@ resolve_openshift_version() {
         fi
 
         # Get previous z-stream version
-        base_version=$(get_previous_z_stream_version "$openshift_version")
-        local prev_result=$?
-
-        if [[ $prev_result -ne 0 ]]; then
+        # (check the assignment directly: under `set -e` a `$?` test after a
+        # failing command substitution is never reached)
+        if ! base_version=$(get_previous_z_stream_version "$openshift_version"); then
             return 1
         fi
 
@@ -992,8 +1092,7 @@ resolve_openshift_version() {
         fi
 
         # Get latest z-stream version (baseline precedence since both are stable)
-        target_version=$(get_latest_version_baseline_priority "$openshift_version")
-        if [[ $? -ne 0 ]]; then
+        if ! target_version=$(get_latest_version_baseline_priority "$openshift_version"); then
             return 1
         fi
 
@@ -1048,8 +1147,9 @@ resolve_openshift_version() {
                 log_info "Previous version ${previous_version} is GA, using latest stable"
             fi
 
-            base_version=$(get_latest_stable_version)
-            if [[ $? -ne 0 ]]; then
+            # Resolve the previous line explicitly: with a major transition the
+            # previous version (e.g. 4.23) is not always the latest GA line (5.0)
+            if ! base_version=$(get_latest_stable_version "$previous_version"); then
                 return 1
             fi
 
@@ -1061,8 +1161,7 @@ resolve_openshift_version() {
                 log_info "Previous version ${previous_version} is pre-GA, using baseline precedence (stable > candidate > CI > nightly)"
             fi
 
-            base_version=$(get_latest_version_baseline_priority "$previous_version")
-            if [[ $? -ne 0 ]]; then
+            if ! base_version=$(get_latest_version_baseline_priority "$previous_version"); then
                 return 1
             fi
         fi
@@ -1072,8 +1171,7 @@ resolve_openshift_version() {
             log_info "Target version ${openshift_version} using target precedence (candidate > CI > nightly)"
         fi
 
-        target_version=$(get_latest_version_target_priority "$openshift_version")
-        if [[ $? -ne 0 ]]; then
+        if ! target_version=$(get_latest_version_target_priority "$openshift_version"); then
             return 1
         fi
     fi
@@ -1085,6 +1183,10 @@ resolve_openshift_version() {
 
 # Export functions for use in other scripts
 export -f _curl_with_retry
+export -f _log_diagnostic
+export -f _log_stream_lookup_failure
+export -f stable_stream_for_version
+export -f dev_preview_stream_for_version
 export -f extract_minor_version
 export -f extract_version_from_candidate
 export -f extract_version_from_stable
@@ -1118,7 +1220,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             get_latest_dev_version
             ;;
         --latest-stable)
-            get_latest_stable_version
+            get_latest_stable_version "${2:-}"
             ;;
         --latest-stable-pullspec)
             get_latest_stable_pullspec
@@ -1175,7 +1277,7 @@ Usage: $0 <command> [options]
 Commands:
   --latest-ga                      Get latest GA version
   --latest-dev                     Get latest development version (GA+1)
-  --latest-stable                  Get latest stable version (for GA version)
+  --latest-stable [version]        Get latest stable version (defaults to the GA line)
   --latest-stable-pullspec         Get pullspec for latest stable version
   --latest-candidate               Get latest candidate version (for dev version)
   --latest-candidate-pullspec      Get pullspec for latest candidate version
@@ -1191,9 +1293,10 @@ Commands:
 Examples:
   $0 --latest-ga                      # Output: 4.21 (from Sippy API)
   $0 --latest-dev                     # Output: 4.22 (always GA+1)
-  $0 --latest-stable                  # Output: 4.21.11 (latest 4.21.x from 4-stable, filtered by GA)
+  $0 --latest-stable                  # Output: 4.21.11 (latest GA line, from that major's stable stream)
+  $0 --latest-stable 5.0              # Output: 5.0.1   (latest 5.0.x from 5-stable)
   $0 --latest-stable-pullspec         # Output: quay.io/openshift-release-dev/ocp-release:4.21.11-x86_64
-  $0 --latest-candidate               # Output: 4.22.0-rc.0 or 4.22.0-ec.5 (RC from 4-stable, or EC from 4-dev-preview)
+  $0 --latest-candidate               # Output: 4.22.0-rc.0 or 4.22.0-ec.5 (RC from {major}-stable, or EC from {major}-dev-preview)
   $0 --latest-candidate-pullspec      # Output: quay.io/.../4.22.0-rc.0-x86_64 or registry.ci.../4.22.0-ec.5
   $0 --latest-nightly                 # Output: 4.22.0-0.nightly-2026-03-13-184504 (dev version)
   $0 --latest-nightly-pullspec        # Output: registry.ci.openshift.org/ocp/release:4.22.0-0.nightly...
@@ -1206,8 +1309,9 @@ Examples:
 
 Notes:
   - Dev version is always exactly 1 minor version ahead of GA (e.g., GA=4.21, Dev=4.22)
-  - Stable versions are filtered from 4-stable stream for GA version line only (e.g., 4.21.x for GA 4.21)
-  - Candidate versions: first checks 4-stable for RC (e.g., 4.22.0-rc.*), falls back to 4-dev-preview for EC (e.g., 4.22.0-ec.*)
+  - Stable versions are filtered from the version's own {major}-stable stream for that line only
+    (e.g., 4.21.x from 4-stable, 5.0.x from 5-stable); RC/EC builds in that stream are excluded
+  - Candidate versions: first checks {major}-stable for RC (e.g., 4.22.0-rc.*), falls back to {major}-dev-preview for EC (e.g., 4.22.0-ec.*)
   - All validation is performed automatically when fetching versions
 
 Can also be sourced in other scripts:

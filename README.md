@@ -127,16 +127,23 @@ curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accept
 curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
   jq -r '.["4-stable"][]'
 
+# Get latest 5.0 stable z-stream (5.x lives in 5-stable, not 4-stable;
+# X-stable also carries that major's RC builds, so exclude them)
+curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
+  jq -r '.["5-stable"][] | select(startswith("5.0.") and ((contains("-rc.") or contains("-ec.")) | not))' | head -1
+
 # Get latest 5.0 RC candidate
 curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
-  jq -r '.["4-stable"][] | select(startswith("5.0.0-rc."))' | head -1
+  jq -r '.["5-stable"][] | select(startswith("5.0.0-rc."))' | head -1
 
 # Get latest 5.1 RC candidate
 curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \
-  jq -r '.["4-stable"][] | select(startswith("5.1.0-rc."))' | head -1
+  jq -r '.["5-stable"][] | select(startswith("5.1.0-rc."))' | head -1
 ```
 
 **Note:** These queries return only **accepted** builds that have passed CI testing. The framework uses this endpoint to ensure reliable version selection.
+
+**Streams are per major version:** 4.x releases are published in `4-stable` / `4-dev-preview` and 5.x releases in `5-stable` / `5-dev-preview`. Always derive the stream from the version's major — querying `4-stable` for a 5.x version returns nothing.
 
 ### OpenShift 5.x Version Mapping
 

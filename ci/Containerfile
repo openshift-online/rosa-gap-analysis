@@ -1,6 +1,7 @@
 # CI build-root image for gap-analysis
 # Used by ci-operator via build_root.project_image.dockerfile_path
-# Tools are layer-cached — installs only re-run when this file changes
+# Tools are layer-cached — installs only re-run when this file or
+# ci/lib/download-with-retry.sh changes
 
 FROM registry.access.redhat.com/ubi9/ubi:latest
 
@@ -32,12 +33,21 @@ RUN pip3 install --no-cache-dir \
         ruff==0.12.11 \
         shellcheck-py==0.10.0.1
 
+# Bounded-retry downloader shared by the tool installs below. A single HTTP 504
+# from a release CDN used to abort the whole build root (and therefore the whole
+# nightly run); this retries only transient statuses and still fails the build on
+# permanent errors or once the attempt budget is exhausted.
+# Must precede the tool installs that call it; the cost of that placement is
+# that editing it busts their cached layers. Relies on the source file's 0755
+# mode, which tests/test_download_with_retry.py asserts.
+COPY ci/lib/download-with-retry.sh /usr/local/bin/download-with-retry
+
 # Install yq (YAML processor - recommended for parsing CredentialsRequests)
 RUN arch=$(uname -m) && \
     case "${arch}" in \
         x86_64)  YQ_ARCH="amd64" ;; \
     esac && \
-    curl -fsSL "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" -o /usr/local/bin/yq && \
+    download-with-retry "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${YQ_ARCH}" /usr/local/bin/yq && \
     chmod +x /usr/local/bin/yq && \
     yq --version
 
@@ -49,7 +59,7 @@ RUN dnf install -y 'dnf-command(config-manager)' && \
     gh --version
 
 # Install oc CLI (OpenShift client - required for 'oc adm release extract')
-RUN curl -fsSL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-${OC_VERSION}/openshift-client-linux.tar.gz" -o /tmp/oc.tar.gz && \
+RUN download-with-retry "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable-${OC_VERSION}/openshift-client-linux.tar.gz" /tmp/oc.tar.gz && \
     tar -xzf /tmp/oc.tar.gz -C /usr/local/bin oc kubectl && \
     chmod +x /usr/local/bin/oc /usr/local/bin/kubectl && \
     rm -f /tmp/oc.tar.gz && \
@@ -61,7 +71,7 @@ RUN arch=$(uname -m) && \
         x86_64)  arch="amd64" ;; \
         aarch64) arch="arm64" ;; \
     esac && \
-    curl -fsSL "${OCM_CLI_BASE_URL}/ocm-linux-${arch}" -o /usr/local/bin/ocm && \
+    download-with-retry "${OCM_CLI_BASE_URL}/ocm-linux-${arch}" /usr/local/bin/ocm && \
     chmod +x /usr/local/bin/ocm && \
     ocm version
 
@@ -72,7 +82,7 @@ RUN arch=$(uname -m) && \
         x86_64)  arch="amd64" ;; \
         aarch64) arch="arm64" ;; \
     esac && \
-    curl -fsSL "${ROSA_CLI_BASE_URL}/rosa_linux_${arch}.zip" -o /tmp/rosa.zip && \
+    download-with-retry "${ROSA_CLI_BASE_URL}/rosa_linux_${arch}.zip" /tmp/rosa.zip && \
     python3 -c "import zipfile; zipfile.ZipFile('/tmp/rosa.zip').extractall('/usr/local/bin')" && \
     chmod +x /usr/local/bin/rosa && \
     rm -f /tmp/rosa.zip && \

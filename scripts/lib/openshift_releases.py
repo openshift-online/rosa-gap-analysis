@@ -147,9 +147,10 @@ def get_latest_stable_version(ga_version=None):
     # Fetch accepted streams (single API call)
     streams = fetch_accepted_streams()
 
-    # Select the stable stream for this version's major (4.21 → 4-stable, 5.0 → 5-stable)
-    stable_stream = stable_stream_for_version(ga_version)
-    stable_versions = streams.get(stable_stream) or []
+    # Derive the stable stream from the version's major prefix (e.g. "5.0" -> "5-stable")
+    # instead of the hardcoded 4-stable, so 5.x resolution works.
+    stable_stream = f"{ga_version.split('.')[0]}-stable"
+    stable_versions = streams.get(stable_stream, []) or []
 
     if not stable_versions:
         log_error(f"No versions found in {stable_stream} accepted stream")
@@ -312,9 +313,10 @@ def get_previous_z_stream_version(minor_version):
     """
     streams = fetch_accepted_streams()
 
-    # Select the stable stream for this version's major (4.21 → 4-stable, 5.0 → 5-stable)
-    stable_stream = stable_stream_for_version(minor_version)
-    stable_versions = streams.get(stable_stream) or []
+    # Derive the stable stream from the version's major prefix (e.g. "5.0" -> "5-stable")
+    # instead of the hardcoded 4-stable, so 5.x GA z-stream resolution works.
+    stable_stream = f"{minor_version.split('.')[0]}-stable"
+    stable_versions = streams.get(stable_stream, []) or []
 
     # Filter to versions matching this minor version line. RC/EC builds also live
     # in X-stable but are not z-streams, so they are excluded from the history.

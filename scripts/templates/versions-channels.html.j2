@@ -133,6 +133,13 @@
             color: #666;
             padding: 0 5px;
         }
+        .note {
+            background-color: #f8f9fa;
+            padding: 12px;
+            border-radius: 5px;
+            color: #555;
+            font-size: 0.9em;
+        }
         .footer {
             margin-top: 30px;
             padding-top: 15px;
@@ -232,6 +239,31 @@
                 {% endfor %}
             </tbody>
         </table>
+
+        {% set query_evidence = summary.channel_query_evidence %}
+        {% if query_evidence and query_evidence.queries %}
+        <h3>Channel Query Diagnostics (baseline and target channels)</h3>
+        <p class="note">How the channel lists above were obtained (diagnostics only — this does not
+        affect the result). <em>Upstream empty</em> means the query succeeded and returned no version
+        rows; <em>filtered locally</em> means versions were returned but dropped by the minor-version
+        filter.</p>
+        <table>
+            <thead>
+                <tr><th>Queries</th><th>With versions</th><th>Upstream empty</th><th>Filtered locally</th><th>Failed</th><th>ROSA fallback used</th><th>Answered by OCM / ROSA</th></tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td>{{ query_evidence.get('queries', 0) }}</td>
+                    <td>{{ query_evidence.get('ok_nonempty', 0) }}</td>
+                    <td>{{ query_evidence.get('ok_empty_upstream', 0) }}</td>
+                    <td>{{ query_evidence.get('ok_all_filtered', 0) }}</td>
+                    <td>{{ query_evidence.get('errors', 0) }}</td>
+                    <td>{{ query_evidence.get('fallback_used', 0) }}</td>
+                    <td>{{ query_evidence.get('sources', {}).get('ocm', 0) }} / {{ query_evidence.get('sources', {}).get('rosa', 0) }}</td>
+                </tr>
+            </tbody>
+        </table>
+        {% endif %}
 
         <h2>Marketplace Availability</h2>
 

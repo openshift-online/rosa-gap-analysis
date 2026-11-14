@@ -289,6 +289,41 @@ When no admin gates exist in cluster-version-operator, acknowledgment files use 
 - Marketplace FAIL: GA target missing from required marketplace (see severity above)
 - Script exits 1 on validation FAIL or execution error
 
+**Channel query provenance (diagnostics only — never affects the result):**
+
+Each channel query records how its version list was produced, so an empty channel can be
+triaged from the artifact alone. The data lives in
+`channel_availability.{baseline,target}.channels.<channel>.query_evidence`, aggregated in
+`channel_availability.query_evidence_summary` and `summary.channel_query_evidence`:
+
+| Field | Meaning |
+|-------|---------|
+| `source` | Which CLI produced the returned list: `ocm`, `rosa` (fallback), or `none` (no attempt succeeded) |
+| `fallback_used` | Whether the ROSA fallback ran after an OCM error |
+| `outcome` | `ok_nonempty`, `ok_empty_upstream` (query succeeded and returned no version rows — for the ROSA fallback this also covers output whose rows no longer parse, see `upstream_item_count`), `ok_all_filtered` (versions returned but dropped by the minor-version filter), or `error` |
+| `attempts[].source` | Which step this attempt records: `ocm`, `rosa`, or `input` (request rejected by format validation before any CLI ran) |
+| `attempts[].status` | `ok` when `error_kind` is `null`, otherwise `error` |
+| `attempts[].query` | Query shape only, each value capped at 120 characters — `command`, `endpoint`, `search`, `size`, `order`, `local_filter` (OCM); `command`, `channel_group`, `local_filter` (ROSA); `check` naming the rejected format check, `minor_version_format` or `channel_group_format` (`input`) |
+| `attempts[].error_kind` | Sanitized failure category: `exit_code`, `timeout`, `cli_not_found`, `invalid_json`, `invalid_minor_version`, `invalid_channel_group` |
+| `attempts[].upstream_item_count` / `matched_count` / `filtered_out_count` | Upstream-versus-filtered counts. Source-relative: for OCM every returned item is counted; the ROSA fallback parses plain text, so only version-shaped rows are countable |
+| `attempts[].filtered_out_sample` | Up to 5 distinct version-shaped tokens that were filtered out; anything not version-shaped is only counted in `filtered_out_unparsable_count` |
+
+The aggregate (`query_evidence_summary` / `summary.channel_query_evidence`) holds `queries`,
+`ok_nonempty`, `ok_empty_upstream`, `ok_all_filtered`, `errors`, `fallback_used`, and
+`sources.{ocm,rosa,none}`, where `ok_* + errors == queries == sum(sources)`.
+
+The evidence is allowlisted: raw CLI stdout/stderr, headers, environment and credential-bearing
+request data are never copied into it. CLI error text keeps flowing to `api_errors` as before.
+
+Triage example:
+
+```bash
+# All channels empty with no api_errors — upstream empty, or filtered locally?
+jq '.summary.channel_query_evidence' gap-analysis-versions-channels_*.json
+jq '.channel_availability.target.channels | map_values(.query_evidence)' \
+  gap-analysis-versions-channels_*.json
+```
+
 ### Check 7: OCM Version Gates
 
 **What it analyzes:**

@@ -1304,6 +1304,30 @@
                 </tbody>
             </table>
 
+            {% set vc_query_evidence = versions_channels.summary.channel_query_evidence %}
+            {% if vc_query_evidence and vc_query_evidence.queries %}
+            <h3>Channel Query Diagnostics (baseline and target channels)</h3>
+            <p>Diagnostics only — this does not affect the result. <strong>Upstream empty</strong> means the
+            query succeeded and returned no version rows; <strong>filtered locally</strong> means versions were
+            returned but dropped by the minor-version filter.</p>
+            <table>
+                <thead>
+                    <tr><th>Queries</th><th>With versions</th><th>Upstream empty</th><th>Filtered locally</th><th>Failed</th><th>ROSA fallback used</th><th>Answered by OCM / ROSA</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td style="text-align: center;">{{ vc_query_evidence.get('queries', 0) }}</td>
+                        <td style="text-align: center;">{{ vc_query_evidence.get('ok_nonempty', 0) }}</td>
+                        <td style="text-align: center;">{{ vc_query_evidence.get('ok_empty_upstream', 0) }}</td>
+                        <td style="text-align: center;">{{ vc_query_evidence.get('ok_all_filtered', 0) }}</td>
+                        <td style="text-align: center;">{{ vc_query_evidence.get('errors', 0) }}</td>
+                        <td style="text-align: center;">{{ vc_query_evidence.get('fallback_used', 0) }}</td>
+                        <td style="text-align: center;">{{ vc_query_evidence.get('sources', {}).get('ocm', 0) }} / {{ vc_query_evidence.get('sources', {}).get('rosa', 0) }}</td>
+                    </tr>
+                </tbody>
+            </table>
+            {% endif %}
+
             <h3>Marketplace Availability</h3>
 
             {% if versions_channels.marketplace is defined and versions_channels.marketplace.hcp is defined %}

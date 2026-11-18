@@ -245,27 +245,154 @@ validate_stable_belongs_to_version() {
     return 0
 }
 
+# Map an untrusted jq `type` result onto a closed whitelist, so a crafted or
+# corrupted response can never inject text into a log line. The case list is
+# the whitelist; anything else collapses to "unknown".
+# Usage: _safe_json_type "$(... | jq -r 'type')" → object|array|string|number|boolean|null|unknown
+_safe_json_type() {
+    # Echo the matched literal rather than the input, so the result is
+    # independent of the input even under `shopt -s nocasematch`.
+    case "$1" in
+        object) echo "object" ;;
+        array) echo "array" ;;
+        string) echo "string" ;;
+        number) echo "number" ;;
+        boolean) echo "boolean" ;;
+        null) echo "null" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+# Map an untrusted value onto a non-negative integer, or "unknown". Keeps
+# counts and lengths safe to interpolate into a diagnostic.
+# Usage: _safe_count "$(... | jq -r 'length')"
+_safe_count() {
+    if [[ "$1" =~ ^[0-9]+$ ]]; then
+        echo "$1"
+    else
+        echo "unknown"
+    fi
+}
+
+# Classify why a Sippy payload did not yield a GA version.
+# Returns a fixed phrase built only from literals, whitelisted JSON type names
+# and integers — never the response body, a body excerpt, headers or jq's
+# stderr, any of which can echo response content into a CI artifact.
+# Usage: _classify_ga_dates_failure <body> <jq-exit-code>
+_classify_ga_dates_failure() {
+    local body="$1"
+    local jq_status="$2"
+    local bytes
+    local root_type
+    local has_ga_dates
+    local ga_dates_type
+    local key_count
+
+    # 126/127 are the shell's "not executable"/"not found" statuses. Probe the
+    # command as well: a jq shim can exit 127 while jq is genuinely on PATH,
+    # and an unreadable jq exits 126 on a payload that is perfectly valid.
+    if ! command -v jq >/dev/null 2>&1 || [[ "$jq_status" == "126" ]] || [[ "$jq_status" == "127" ]]; then
+        echo "jq is unavailable or not executable (exit ${jq_status})"
+        return 0
+    fi
+
+    # Trailing newlines were already stripped by the capturing substitutions.
+    bytes=$(_safe_count "$(printf '%s' "$body" | wc -c 2>/dev/null | tr -d '[:space:]' 2>/dev/null)")
+
+    # jq exits 0 and prints nothing on blank input, which would otherwise be
+    # reported as invalid JSON alongside a success exit code.
+    if [[ -z "${body//[[:space:]]/}" ]]; then
+        echo "response body is blank (${bytes} byte(s))"
+        return 0
+    fi
+
+    root_type=$(_safe_json_type "$(printf '%s' "$body" | jq -r 'type' 2>/dev/null)")
+    if [[ "$root_type" == "unknown" ]]; then
+        echo "response is not valid JSON (jq exit ${jq_status}, ${bytes} byte(s))"
+        return 0
+    fi
+
+    if [[ "$root_type" != "object" ]]; then
+        echo "response root is JSON ${root_type}, expected object (${bytes} byte(s))"
+        return 0
+    fi
+
+    # `|| true` keeps this safe if a caller enables `shopt -s inherit_errexit`.
+    has_ga_dates=$(printf '%s' "$body" | jq -r 'has("ga_dates")' 2>/dev/null) || true
+    if [[ "$has_ga_dates" != "true" ]]; then
+        echo "response has no ga_dates field (${bytes} byte(s))"
+        return 0
+    fi
+
+    ga_dates_type=$(_safe_json_type "$(printf '%s' "$body" | jq -r '.ga_dates | type' 2>/dev/null)")
+    if [[ "$ga_dates_type" != "object" ]]; then
+        echo "ga_dates is JSON ${ga_dates_type}, expected object (${bytes} byte(s))"
+        return 0
+    fi
+
+    key_count=$(_safe_count "$(printf '%s' "$body" | jq -r '.ga_dates | keys | length' 2>/dev/null)")
+    if [[ "$key_count" == "0" ]]; then
+        echo "ga_dates is an empty object (${bytes} byte(s))"
+        return 0
+    fi
+
+    echo "ga_dates holds ${key_count} key(s), at least one of which is not a numeric version"
+}
+
 # Get the latest GA (generally available) OpenShift version
 # Usage: get_latest_ga_version
 # Returns: Version string (e.g., "4.21") or empty string on failure
 # Exit: 0 on success, 1 on failure
+#
+# The fetch and the parse are separate stages with separate diagnostics. A
+# successful HTTP response whose payload cannot be parsed is reported as a
+# parse failure rather than being folded into the fetch error, so a CI
+# artifact alone distinguishes an unreachable API from an unexpected payload.
+# jq's stderr stays suppressed because it can quote the response; its exit
+# code and a fixed classification are reported instead. That guarantee covers
+# the parse stage added here; the fetch stage keeps _curl_with_retry's own
+# long-standing HTTP logging unchanged.
 get_latest_ga_version() {
+    local body
     local version
+    local jq_status
+    local reason
 
-    version=$(_curl_with_retry "${SIPPY_API}" | \
-        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null)
+    # Stage 1: fetch. _curl_with_retry logs its own HTTP-level diagnostics.
+    if ! body=$(_curl_with_retry "${SIPPY_API}"); then
+        _log_ga_version_failure "request to ${SIPPY_API} returned no usable response"
+        return 1
+    fi
 
-    if [[ -z "$version" ]] || [[ "$version" == "null" ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest GA version from Sippy API"
-        else
-            echo "Error: Failed to fetch latest GA version" >&2
-        fi
+    # Stage 2: parse. Keep jq's exit code; `if` keeps `set -e` from aborting here.
+    if version=$(printf '%s' "$body" | \
+        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null); then
+        jq_status=0
+    else
+        jq_status=$?
+    fi
+
+    if [[ $jq_status -ne 0 ]] || [[ -z "$version" ]] || [[ "$version" == "null" ]]; then
+        reason=$(_classify_ga_dates_failure "$body" "$jq_status")
+        _log_ga_version_failure "could not read ga_dates from ${SIPPY_API}: ${reason}"
         return 1
     fi
 
     echo "$version"
     return 0
+}
+
+# Report a GA-version resolution failure: the long-standing error line that
+# marks the failure, followed by one bounded, non-sensitive diagnostic naming
+# the stage that failed.
+# Usage: _log_ga_version_failure <fixed-classification>
+_log_ga_version_failure() {
+    if command -v log_error &>/dev/null; then
+        log_error "Failed to fetch latest GA version from Sippy API"
+    else
+        echo "Error: Failed to fetch latest GA version" >&2
+    fi
+    _log_diagnostic "GA version resolution failed: $1"
 }
 
 # Fetch all accepted release streams (cached to avoid multiple API calls)
@@ -1185,6 +1312,10 @@ resolve_openshift_version() {
 export -f _curl_with_retry
 export -f _log_diagnostic
 export -f _log_stream_lookup_failure
+export -f _safe_json_type
+export -f _safe_count
+export -f _classify_ga_dates_failure
+export -f _log_ga_version_failure
 export -f stable_stream_for_version
 export -f dev_preview_stream_for_version
 export -f extract_minor_version

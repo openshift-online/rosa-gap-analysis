@@ -3,13 +3,17 @@
 scripts/gap-all.sh — the script Prow actually runs — sources
 scripts/lib/openshift-releases.sh, so the shell copy of the resolver needs the
 same coverage as the Python one. These tests drive the real functions through
-bash with the accepted-streams cache pre-seeded from a fixture, so no API is
-contacted.
+bash with the accepted-streams cache pre-seeded from a fixture, with
+_curl_with_retry stubbed, or with the `curl` binary itself stubbed, so no API
+is contacted.
 """
 
 import json
+import os
+import shlex
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -388,3 +392,293 @@ def test_consumer_path_still_fails_when_the_line_has_no_stable_release():
     assert "REACHED_NEXT_STEP" not in out
     assert "No stable versions found for 5.0.x" in err
     assert "5-stable holds 2 accepted version(s)" in err
+
+
+# --- get_latest_ga_version: fetch stage vs parse stage ----------------------
+#
+# These drive the real get_latest_ga_version with the `curl` BINARY stubbed
+# rather than _curl_with_retry, so the genuine retry and logging layer runs and
+# the fetch/parse split is actually exercised. Nothing contacts the network and
+# no credentials are involved.
+
+# Minimum set of external commands the library needs once PATH is sandboxed.
+_SANDBOX_BINARIES = ("bash", "cat", "dirname", "mktemp", "rm", "sleep", "tr", "wc")
+
+# Printed by the harness so a test can tell a resolved version from a failure.
+_GA_CALL = """
+if ga=$(get_latest_ga_version); then
+    echo "GA=$ga"
+else
+    echo "RC=$?"
+fi
+"""
+
+
+def _write_curl_stub(bindir, sippy_body, streams_body, http_code):
+    """Install a `curl` that answers from fixtures instead of the network.
+
+    Honours curl's `-o <file>` and writes the HTTP status to stdout, which is
+    the contract _curl_with_retry relies on (`-w '%{http_code}' -o "$tmpfile"`).
+    """
+    sippy_file = bindir / "_sippy_body"
+    sippy_file.write_text(sippy_body)
+    streams_file = bindir / "_streams_body"
+    streams_file.write_text(streams_body)
+
+    stub = bindir / "curl"
+    stub.write_text(
+        "#!/bin/bash\n"
+        'out=""; prev=""; url=""\n'
+        'for arg in "$@"; do\n'
+        '  if [ "$prev" = "-o" ]; then out="$arg"; fi\n'
+        '  case "$arg" in https://*) url="$arg" ;; esac\n'
+        '  prev="$arg"\n'
+        "done\n"
+        'case "$url" in\n'
+        f"  *sippy*) cat {shlex.quote(str(sippy_file))} > \"$out\" ;;\n"
+        f"  *)       cat {shlex.quote(str(streams_file))} > \"$out\" ;;\n"
+        "esac\n"
+        f"printf '%s' '{http_code}'\n"
+    )
+    stub.chmod(0o755)
+
+
+def run_with_stubbed_curl(
+    sippy_body,
+    call=_GA_CALL,
+    streams_body=None,
+    http_code="200",
+    with_jq=True,
+):
+    """Run `call` against the real library with the curl binary stubbed.
+
+    with_jq=False sandboxes PATH down to _SANDBOX_BINARIES plus the stub, so jq
+    really is absent and the shell really does produce exit 127.
+    Returns (returncode, stdout, stderr).
+    """
+    with tempfile.TemporaryDirectory() as tmp:
+        bindir = Path(tmp)
+        _write_curl_stub(
+            bindir, sippy_body, streams_body if streams_body is not None else "{}", http_code
+        )
+
+        if with_jq:
+            path = f"{bindir}{os.pathsep}{os.environ['PATH']}"
+        else:
+            for name in _SANDBOX_BINARIES:
+                located = shutil.which(name)
+                if located is None:
+                    pytest.skip(f"sandboxed PATH needs {name}")
+                (bindir / name).symlink_to(located)
+            path = str(bindir)
+
+        # Shadow sleep so the retry *waits* are skipped. The retry COUNT is
+        # untouched; the tests below assert all three attempts still happen.
+        script = f"""
+set -euo pipefail
+source "{RELEASES_LIB}"
+sleep() {{ :; }}
+{call}
+"""
+        proc = subprocess.run(
+            ["bash", "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+            # Minimal environment: no ambient tokens, no BASH_ENV.
+            env={"PATH": path, "HOME": tmp, "LC_ALL": "C"},
+        )
+    return proc.returncode, proc.stdout.strip(), proc.stderr
+
+
+def test_ga_version_orders_minors_numerically_not_lexically():
+    """4.9 sorts after 4.20 lexically; the numeric sort must still win."""
+    body = json.dumps({"ga_dates": {"4.9": "d", "4.20": "d", "4.10": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.20"
+    assert "Failed to fetch" not in err
+
+
+def test_ga_version_reports_non_json_response():
+    rc, out, err = run_with_stubbed_curl("<html><title>Bad Gateway</title></html>")
+    assert rc == 0, err  # the harness swallows the non-zero; the function returned 1
+    assert out == "RC=1"
+    assert "Failed to fetch latest GA version from Sippy API" in err
+    assert "response is not valid JSON" in err
+    # jq's own parse error can quote the offending bytes, so it must stay hidden.
+    assert "jq:" not in err
+    assert len([line for line in err.splitlines() if line.strip()]) == 2
+
+
+def test_ga_version_reports_absent_ga_dates():
+    body = json.dumps({"releases": ["4.20", "4.21"]})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "response has no ga_dates field" in err
+    # The byte count is a real measurement, not a placeholder.
+    assert f"({len(body)} byte(s))" in err
+
+
+def test_ga_version_reports_wrong_ga_dates_type():
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": ["4.20"]}))
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "ga_dates is JSON array, expected object" in err
+
+
+def test_ga_version_reports_non_object_root():
+    rc, out, err = run_with_stubbed_curl(json.dumps(["4.20", "4.21"]))
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "response root is JSON array, expected object" in err
+
+
+def test_ga_version_reports_empty_ga_dates():
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": {}}))
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "ga_dates is an empty object" in err
+
+
+def test_ga_version_reports_non_numeric_keys():
+    body = json.dumps({"ga_dates": {"four-twenty": "d", "4.21": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "ga_dates holds 2 key(s), at least one of which is not a numeric version" in err
+
+
+def test_ga_version_reports_blank_response_body():
+    """A whitespace-only 200 clears _curl_with_retry's non-empty check, and jq
+    exits 0 on it — so the empty-version guard is the only thing that fails it."""
+    rc, out, err = run_with_stubbed_curl("   \n  ")
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "response body is blank" in err
+    # Must not be mislabelled as a parse error when jq reported success.
+    assert "not valid JSON" not in err
+
+
+def test_ga_version_rejects_a_payload_jq_only_partially_parsed():
+    """jq can print a usable-looking value AND exit non-zero on trailing junk.
+    The version must be rejected rather than passed on to the callers."""
+    rc, out, err = run_with_stubbed_curl('{"ga_dates":{"4.21":"d"}} trailing garbage')
+    assert rc == 0, err
+    assert out == "RC=1", "a partially parsed payload must not yield a GA version"
+    assert "could not read ga_dates" in err
+
+
+def test_ga_version_reports_unusable_jq():
+    body = json.dumps({"ga_dates": {"4.21": "d"}})
+    rc, out, err = run_with_stubbed_curl(body, with_jq=False)
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "jq is unavailable or not executable (exit 127)" in err
+    # A missing parser must not be misreported as a bad payload.
+    assert "not valid JSON" not in err
+    # Tripwire: the sandboxed PATH must be complete, so the only thing missing
+    # is jq. Without this, a second missing binary would pass unnoticed.
+    assert "command not found" not in err
+
+
+def test_ga_version_separates_transport_failure_from_parse_failure():
+    """A non-2xx response keeps _curl_with_retry's existing per-attempt logging
+    and is classified as a request failure, never as a payload problem.
+
+    Only the request/parse split is asserted here. The content of
+    _curl_with_retry's own HTTP lines is its long-standing behaviour and is
+    outside what this function changed.
+    """
+    body = json.dumps({"ga_dates": {"4.21": "d"}})
+    rc, out, err = run_with_stubbed_curl(body, http_code="503")
+    assert rc == 0, err
+    assert out == "RC=1"
+    # Retry count is unchanged: all three attempts are still reported.
+    for attempt in (1, 2, 3):
+        assert f"API request failed (attempt {attempt}/3)" in err
+    assert "API request failed after 3 attempts" in err
+    assert "returned no usable response" in err
+    assert "could not read ga_dates" not in err
+
+
+# One body per classification branch, each carrying the sentinel, so a body
+# excerpt added to any single branch is caught rather than only the first.
+_SENTINEL = "SENTINEL-must-never-reach-a-log-9f2c1b"
+_SENTINEL_BODIES = {
+    "not-json": f"<html>{_SENTINEL}</html>",
+    "non-object-root": json.dumps([_SENTINEL]),
+    "absent-ga-dates": json.dumps({"unexpected": _SENTINEL, "note": _SENTINEL}),
+    "wrong-ga-dates-type": json.dumps({"ga_dates": _SENTINEL}),
+    "empty-ga-dates": json.dumps({"ga_dates": {}, "note": _SENTINEL}),
+    "non-numeric-keys": json.dumps({"ga_dates": {_SENTINEL: "d"}}),
+}
+
+
+@pytest.mark.parametrize("label", sorted(_SENTINEL_BODIES))
+def test_ga_version_diagnostic_never_echoes_the_response(label):
+    """Every classification branch must stay free of response content."""
+    rc, out, err = run_with_stubbed_curl(_SENTINEL_BODIES[label])
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert _SENTINEL not in err, f"{label} branch leaked the response body"
+    assert _SENTINEL not in out
+    assert "jq:" not in err, f"{label} branch leaked jq stderr"
+    # Two lines only (the error marker plus one classification), both bounded.
+    lines = [line for line in err.splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert all(len(line) < 200 for line in lines)
+
+
+def test_ga_version_diagnostic_is_deterministic_and_names_only_the_endpoint():
+    body = json.dumps({"unexpected": _SENTINEL})
+    first = run_with_stubbed_curl(body)
+    second = run_with_stubbed_curl(body)
+    assert first == second, "the diagnostic must not vary between runs"
+    err = first[2]
+    # Only the fixed endpoint is named, with no query string appended.
+    assert "https://sippy.dptools.openshift.org/api/releases" in err
+    assert "?" not in err
+
+
+def test_safe_helpers_reject_untrusted_values():
+    """The sanitizers are the whole leak defence, so pin both directions."""
+    rc, out, err = run_resolver(
+        "_safe_json_type object; _safe_json_type null; "
+        "_safe_json_type 'object\nINJECTED [ERROR] fake'; "
+        "_safe_json_type 'obj*'; _safe_json_type ''; "
+        "_safe_count 42; _safe_count 0; "
+        "_safe_count '7; rm -rf /'; _safe_count -1; _safe_count ''",
+        streams={},
+    )
+    assert rc == 0, err
+    assert out.splitlines() == [
+        "object", "null", "unknown", "unknown", "unknown",
+        "42", "0", "unknown", "unknown", "unknown",
+    ]
+
+
+def test_caller_path_surfaces_the_parse_classification():
+    """resolve_openshift_version is what gap-all.sh calls; its step 1 failure
+    must carry the new classification, not just the legacy error line."""
+    rc, out, err = run_with_stubbed_curl(
+        json.dumps({"releases": ["4.20"]}),
+        call='if resolve_openshift_version 4.20; then echo "OK"; else echo "RC=$?"; fi',
+    )
+    assert out == "RC=1", err
+    assert "Failed to fetch latest GA version from Sippy API" in err
+    assert "response has no ga_dates field" in err
+
+
+def test_caller_path_still_resolves_when_sippy_is_well_formed():
+    """The split must not regress the happy path through the real HTTP stage."""
+    rc, out, err = run_with_stubbed_curl(
+        json.dumps({"ga_dates": {"4.22": "d", "5.0": "d"}}),
+        streams_body=as_json(ACCEPTED_STREAMS),
+        call=GAP_ALL_CONSUMER,
+    )
+    assert rc == 0, err
+    assert "REACHED_NEXT_STEP" in out
+    assert "BASELINE=5.0.0" in out
+    assert "TARGET=5.0.1" in out

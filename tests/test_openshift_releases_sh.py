@@ -402,7 +402,7 @@ def test_consumer_path_still_fails_when_the_line_has_no_stable_release():
 # no credentials are involved.
 
 # Minimum set of external commands the library needs once PATH is sandboxed.
-_SANDBOX_BINARIES = ("bash", "cat", "dirname", "mktemp", "rm", "sleep", "tr", "wc")
+_SANDBOX_BINARIES = ("bash", "cat", "dirname", "grep", "mktemp", "rm", "sleep", "tr", "wc")
 
 # Printed by the harness so a test can tell a resolved version from a failure.
 _GA_CALL = """
@@ -505,7 +505,7 @@ def test_ga_version_reports_non_json_response():
     assert rc == 0, err  # the harness swallows the non-zero; the function returned 1
     assert out == "RC=1"
     assert "Failed to fetch latest GA version from Sippy API" in err
-    assert "response is not valid JSON" in err
+    assert "response is not a single valid JSON document" in err
     # jq's own parse error can quote the offending bytes, so it must stay hidden.
     assert "jq:" not in err
     assert len([line for line in err.splitlines() if line.strip()]) == 2
@@ -562,12 +562,37 @@ def test_ga_version_reports_blank_response_body():
 
 
 def test_ga_version_rejects_a_payload_jq_only_partially_parsed():
-    """jq can print a usable-looking value AND exit non-zero on trailing junk.
-    The version must be rejected rather than passed on to the callers."""
+    """jq streams values as it reads them, so it prints a type for the leading
+    document and only then fails on the trailing junk. Output alone therefore
+    does not prove the body parsed; the probe's exit status must decide.
+
+    The payload must be rejected AND classified as invalid JSON -- `4.21` is a
+    perfectly good numeric key, so blaming the keys would misdirect triage.
+    """
     rc, out, err = run_with_stubbed_curl('{"ga_dates":{"4.21":"d"}} trailing garbage')
     assert rc == 0, err
     assert out == "RC=1", "a partially parsed payload must not yield a GA version"
     assert "could not read ga_dates" in err
+    assert "response is not a single valid JSON document" in err
+    assert "numeric version" not in err, "must not be blamed on the key format"
+    assert "jq:" not in err
+
+
+def test_ga_version_rejects_a_valid_multi_document_response():
+    """A JSON *stream* parses cleanly, so the extract filter runs once per
+    document and emits one version per line. Without a single-document gate
+    that multi-line value is returned as if it were a GA version.
+    """
+    body = '{"ga_dates":{"4.20":"d"}} {"ga_dates":{"4.21":"d"}}'
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", "a multi-document response must not yield a GA version"
+    assert "response holds 2 JSON document(s), expected exactly 1" in err
+    # Fail-closed: neither per-document version reaches stdout or the log.
+    assert "4.20" not in err and "4.21" not in err
+    assert "jq:" not in err
+    lines = [line for line in err.splitlines() if line.strip()]
+    assert len(lines) == 2
 
 
 def test_ga_version_reports_unusable_jq():
@@ -613,6 +638,10 @@ _SENTINEL_BODIES = {
     "wrong-ga-dates-type": json.dumps({"ga_dates": _SENTINEL}),
     "empty-ga-dates": json.dumps({"ga_dates": {}, "note": _SENTINEL}),
     "non-numeric-keys": json.dumps({"ga_dates": {_SENTINEL: "d"}}),
+    "trailing-garbage": json.dumps({"ga_dates": {"4.21": "d"}}) + f" {_SENTINEL}",
+    "multi-document": json.dumps({"ga_dates": {"4.20": "d"}})
+    + " "
+    + json.dumps({"note": _SENTINEL}),
 }
 
 

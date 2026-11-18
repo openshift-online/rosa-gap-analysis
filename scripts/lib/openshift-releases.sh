@@ -278,15 +278,25 @@ _safe_count() {
 # Returns a fixed phrase built only from literals, whitelisted JSON type names
 # and integers — never the response body, a body excerpt, headers or jq's
 # stderr, any of which can echo response content into a CI artifact.
-# Usage: _classify_ga_dates_failure <body> <jq-exit-code>
+# root_rc/doc_count come from the caller's parse probe, so the exit status is
+# judged before the output is sanitized.
+# Usage: _classify_ga_dates_failure <body> <jq-exit-code> <root-rc> <doc-count>
 _classify_ga_dates_failure() {
     local body="$1"
     local jq_status="$2"
+    local root_rc
+    local doc_count
     local bytes
     local root_type
     local has_ga_dates
     local ga_dates_type
     local key_count
+
+    # Sanitize here too: the function is export -f'd, so it must not rely on a
+    # caller having validated these before interpolating them into a log line.
+    jq_status=$(_safe_count "$jq_status")
+    root_rc=$(_safe_count "$3")
+    doc_count=$(_safe_count "$4")
 
     # 126/127 are the shell's "not executable"/"not found" statuses. Probe the
     # command as well: a jq shim can exit 127 while jq is genuinely on PATH,
@@ -306,12 +316,22 @@ _classify_ga_dates_failure() {
         return 0
     fi
 
-    root_type=$(_safe_json_type "$(printf '%s' "$body" | jq -r 'type' 2>/dev/null)")
-    if [[ "$root_type" == "unknown" ]]; then
-        echo "response is not valid JSON (jq exit ${jq_status}, ${bytes} byte(s))"
+    # jq streams values as it reads them, so output alone does not prove the
+    # whole body parsed: a trailing-garbage payload prints a type and then
+    # fails. Judge the probe's exit status first, before any sanitized output.
+    if [[ "$root_rc" != "0" ]]; then
+        echo "response is not a single valid JSON document (jq exit ${root_rc}, ${bytes} byte(s))"
         return 0
     fi
 
+    # A JSON *stream* parses cleanly but is still not the single object this
+    # endpoint is expected to return.
+    if [[ "$doc_count" != "1" ]]; then
+        echo "response holds ${doc_count} JSON document(s), expected exactly 1 (${bytes} byte(s))"
+        return 0
+    fi
+
+    root_type=$(_safe_json_type "$(printf '%s' "$body" | jq -r 'type' 2>/dev/null)")
     if [[ "$root_type" != "object" ]]; then
         echo "response root is JSON ${root_type}, expected object (${bytes} byte(s))"
         return 0
@@ -356,6 +376,9 @@ get_latest_ga_version() {
     local body
     local version
     local jq_status
+    local root_types
+    local root_rc
+    local doc_count
     local reason
 
     # Stage 1: fetch. _curl_with_retry logs its own HTTP-level diagnostics.
@@ -364,7 +387,24 @@ get_latest_ga_version() {
         return 1
     fi
 
-    # Stage 2: parse. Keep jq's exit code; `if` keeps `set -e` from aborting here.
+    # Stage 2a: the body must parse completely, as exactly one JSON document,
+    # before any value read out of it can be trusted. jq emits values as it
+    # reads them, so it prints a type and then fails on trailing garbage, and
+    # prints one line per document on a JSON stream. Capture the exit status
+    # here, before the output is sanitized, and count the documents.
+    if root_types=$(printf '%s' "$body" | jq -r 'type' 2>/dev/null); then
+        root_rc=0
+    else
+        root_rc=$?
+    fi
+    # Counted with wc rather than grep so this adds no new runtime dependency.
+    if [[ -z "$root_types" ]]; then
+        doc_count=0
+    else
+        doc_count=$(_safe_count "$(printf '%s\n' "$root_types" | wc -l 2>/dev/null | tr -d '[:space:]' 2>/dev/null)")
+    fi
+
+    # Stage 2b: extract. Keep jq's exit code; `if` keeps `set -e` from aborting.
     if version=$(printf '%s' "$body" | \
         jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null); then
         jq_status=0
@@ -372,8 +412,12 @@ get_latest_ga_version() {
         jq_status=$?
     fi
 
-    if [[ $jq_status -ne 0 ]] || [[ -z "$version" ]] || [[ "$version" == "null" ]]; then
-        reason=$(_classify_ga_dates_failure "$body" "$jq_status")
+    # root_rc is redundant in practice (both jq runs parse the same stream, so
+    # a probe failure implies an extract failure) but is kept as an explicit,
+    # independent "the body parsed completely" precondition.
+    if [[ $root_rc -ne 0 ]] || [[ "$doc_count" != "1" ]] || \
+       [[ $jq_status -ne 0 ]] || [[ -z "$version" ]] || [[ "$version" == "null" ]]; then
+        reason=$(_classify_ga_dates_failure "$body" "$jq_status" "$root_rc" "$doc_count")
         _log_ga_version_failure "could not read ga_dates from ${SIPPY_API}: ${reason}"
         return 1
     fi

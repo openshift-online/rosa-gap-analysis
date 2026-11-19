@@ -623,6 +623,31 @@ def test_ga_version_rejects_a_payload_with_a_non_finite_number(literal):
     assert len(lines) == 2
 
 
+def test_ga_version_rejects_a_non_finite_number_hidden_by_a_duplicate_key():
+    """Object construction is lossy: on a duplicate key the later value
+    replaces the earlier one. A guard that walks the *built* value therefore
+    sees a wholly finite object here and lets the body through, even though
+    `Infinity` was parsed. The scalars must be checked as parse events, before
+    construction discards them.
+    """
+    body = '{"ga_dates":{"4.21":"d"},"extra":Infinity,"extra":0}'
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", "a discarded non-finite value must still reject the body"
+    assert "non-finite number" in err
+    assert "4.21" not in err
+    assert "jq:" not in err
+
+
+def test_ga_version_rejects_a_non_finite_number_in_a_nested_duplicate_key():
+    """Same loss one level down, where the surviving value is also finite."""
+    body = '{"ga_dates":{"4.21":"d"},"meta":{"x":NaN,"x":1}}'
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "non-finite number" in err
+
+
 def test_ga_version_still_accepts_finite_numbers_in_the_payload():
     """The non-finite gate must not reject ordinary numeric fields: the same
     shape with a finite number has to resolve exactly as before.

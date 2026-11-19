@@ -314,12 +314,22 @@ _safe_count() {
 # dates, so such a value is already an unexpected payload, and a number that
 # cannot be read back faithfully is not one to resolve a version from.
 #
+# Scalars are inspected as parse events (`--stream`) rather than by walking
+# the built value, because object construction is lossy: on a duplicate key
+# the later value replaces the earlier one, so
+# `{"ga_dates":{"4.21":"d"},"extra":Infinity,"extra":0}` would present a
+# wholly finite object to a recursive walk while still being a body no JSON
+# parser should have accepted. The event stream reports both values. `any`
+# short-circuits, so a large payload is not read further than the first hit.
+#
 # Prints nothing. Exit: 0 when a non-finite number is present, 1 otherwise
 # (including when the body does not parse at all — the caller's parse probe
 # owns that case, and jq's own stderr stays suppressed either way).
 # Usage: _json_has_non_finite_number <body>
 _json_has_non_finite_number() {
-    printf '%s' "$1" | jq -e 'any(..; (type == "number") and (isinfinite or isnan))' \
+    # A --stream event is [path, value] for a scalar and [path] for a close.
+    printf '%s' "$1" | jq -e -n --stream \
+        'any(inputs; length == 2 and (.[1] | type == "number") and (.[1] | isinfinite or isnan))' \
         >/dev/null 2>&1
 }
 

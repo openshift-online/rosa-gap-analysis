@@ -595,6 +595,81 @@ def test_ga_version_rejects_a_valid_multi_document_response():
     assert len(lines) == 2
 
 
+@pytest.mark.parametrize(
+    "literal", ["Infinity", "-Infinity", "NaN", "nan", "1e400"]
+)
+def test_ga_version_rejects_a_payload_with_a_non_finite_number(literal):
+    """jq's parser is a superset of JSON: it accepts the bare literals
+    Infinity, -Infinity and NaN. Such a body parses with exit 0 as a single
+    document, so the exit status alone cannot stand in for "this was JSON"
+    and the resolver would return a version from a payload JSON forbids.
+
+    1e400 is valid JSON grammar but overflows a double and reads back as
+    infinite, so it is rejected on the same ground: a number that cannot be
+    read back faithfully is not one to resolve a version from.
+    """
+    body = '{"ga_dates":{"4.21":"d"},"extra":' + literal + "}"
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", f"a payload carrying {literal} must not yield a GA version"
+    assert "could not read ga_dates" in err
+    assert "non-finite number" in err
+    # `4.21` is a perfectly good key, so blaming the key format would
+    # misdirect triage exactly as the partial-parse branch once did.
+    assert "numeric version" not in err
+    assert "4.21" not in err
+    assert "jq:" not in err
+    lines = [line for line in err.splitlines() if line.strip()]
+    assert len(lines) == 2
+
+
+def test_ga_version_still_accepts_finite_numbers_in_the_payload():
+    """The non-finite gate must not reject ordinary numeric fields: the same
+    shape with a finite number has to resolve exactly as before.
+    """
+    body = json.dumps(
+        {"ga_dates": {"4.20": "d", "4.21": "d"}, "extra": 1, "ratio": 1.5e10}
+    )
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.21"
+    assert "Failed to fetch" not in err
+    assert "non-finite" not in err
+
+
+def test_ga_version_rejects_a_response_carrying_a_raw_nul_byte():
+    """Bash command substitution silently drops NUL bytes, so a 200 response
+    holding a valid GA object plus a raw NUL would be captured as a clean
+    object and pass every parse check — the resolver would resolve a version
+    from a body the server never sent. The bytes are counted on the response
+    file, before the capture, so the response is rejected instead.
+    """
+    body = '{"ga_dates":{"4.21":"d"}}\x00'
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", "a NUL-carrying response must not yield a GA version"
+    # Named as a count, never as body bytes, and the snippet is dropped.
+    assert "RESPONSE_NUL_BYTES=1" in err
+    assert "4.21" not in err
+    # Rejected at the fetch stage, so the retry layer stays in charge.
+    for attempt in (1, 2, 3):
+        assert f"API request failed (attempt {attempt}/3)" in err
+    assert "returned no usable response" in err
+
+
+def test_curl_retry_returns_a_clean_body_unchanged():
+    """Tripwire for the NUL counting added above: the ordinary success path
+    must still hand back the exact bytes, with no measurement side effect.
+    """
+    body = json.dumps({"ga_dates": {"4.21": "2025-01-01"}})
+    rc, out, err = run_with_stubbed_curl(
+        body, call='_curl_with_retry "${SIPPY_API}"'
+    )
+    assert rc == 0, err
+    assert out == body
+    assert "API request failed" not in err
+
+
 def test_ga_version_reports_unusable_jq():
     body = json.dumps({"ga_dates": {"4.21": "d"}})
     rc, out, err = run_with_stubbed_curl(body, with_jq=False)
@@ -642,6 +717,9 @@ _SENTINEL_BODIES = {
     "multi-document": json.dumps({"ga_dates": {"4.20": "d"}})
     + " "
     + json.dumps({"note": _SENTINEL}),
+    "non-finite-number": '{"ga_dates":{"4.21":"d"},"note":"'
+    + _SENTINEL
+    + '","extra":Infinity}',
 }
 
 

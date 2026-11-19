@@ -648,6 +648,36 @@ def test_ga_version_rejects_a_non_finite_number_in_a_nested_duplicate_key():
     assert "non-finite number" in err
 
 
+def test_ga_version_rejects_a_non_finite_number_early_in_a_large_response():
+    """Regression for a SIGPIPE fail-open.
+
+    A probe that stops at the first hit lets jq exit while the writer still
+    has data to push. The writer takes SIGPIPE, and under `pipefail` -- which
+    scripts/gap-all.sh sets -- the pipeline reports 141 even though the
+    detection succeeded, so the caller reads it as "nothing found". Small
+    fixtures hide this entirely: they fit in the pipe buffer, so the writer
+    finishes before jq exits. The padding here is what exposes it.
+    """
+    body = (
+        '{"ga_dates":{"4.21":"d"},"extra":Infinity,"pad":"'
+        + "x" * (2 * 1024 * 1024)
+        + '"}'
+    )
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", "a non-finite number must be caught regardless of body size"
+    assert "non-finite number" in err
+
+
+def test_ga_version_accepts_a_large_clean_response():
+    """The other half: padding alone must not trip the gate."""
+    body = json.dumps({"ga_dates": {"4.20": "d", "4.21": "d"}, "pad": "x" * (2 * 1024 * 1024)})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.21"
+    assert "non-finite" not in err
+
+
 def test_ga_version_still_accepts_finite_numbers_in_the_payload():
     """The non-finite gate must not reject ordinary numeric fields: the same
     shape with a finite number has to resolve exactly as before.

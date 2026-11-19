@@ -319,8 +319,14 @@ _safe_count() {
 # the later value replaces the earlier one, so
 # `{"ga_dates":{"4.21":"d"},"extra":Infinity,"extra":0}` would present a
 # wholly finite object to a recursive walk while still being a body no JSON
-# parser should have accepted. The event stream reports both values. `any`
-# short-circuits, so a large payload is not read further than the first hit.
+# parser should have accepted. The event stream reports both values.
+#
+# Every event is consumed, deliberately, instead of stopping at the first hit.
+# A short-circuiting `any` lets jq exit while printf still has data to write;
+# printf then takes SIGPIPE, and under `pipefail` — which scripts/gap-all.sh
+# sets — the pipeline yields 141 even though the detection succeeded. The
+# caller reads that as "no non-finite number" and the body sails through. So
+# the win from stopping early is exactly the bug: `reduce` reads to the end.
 #
 # Prints nothing. Exit: 0 when a non-finite number is present, 1 otherwise
 # (including when the body does not parse at all — the caller's parse probe
@@ -329,7 +335,10 @@ _safe_count() {
 _json_has_non_finite_number() {
     # A --stream event is [path, value] for a scalar and [path] for a close.
     printf '%s' "$1" | jq -e -n --stream \
-        'any(inputs; length == 2 and (.[1] | type == "number") and (.[1] | isinfinite or isnan))' \
+        'reduce inputs as $e (false;
+            . or ($e | length == 2
+                  and (.[1] | type == "number")
+                  and (.[1] | isinfinite or isnan)))' \
         >/dev/null 2>&1
 }
 

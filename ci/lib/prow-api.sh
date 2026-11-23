@@ -12,7 +12,12 @@ set -euo pipefail
 # Configuration
 GANGWAY_URL="${GANGWAY_URL:-https://gangway-ci.apps.ci.l2s4.p1.openshiftapps.com/v1}"
 PROW_URL="${PROW_URL:-https://prow.ci.openshift.org}"
-GCS_BASE_URL="${GCS_BASE_URL:-https://gcsweb-ci.apps.ci.l2s4.p1.openshiftapps.com/gcs/test-platform-results/logs}"
+# OpenShift CI serves world-readable job artifacts from test-platform-results-public.
+# test-platform-results enforces public access prevention: anonymous and
+# unprivileged reads of it fail (HTTP 401/403), and gcsweb-ci sends its paths to
+# a Google sign-in page.
+GCS_BUCKET="${GCS_BUCKET:-test-platform-results-public}"
+GCS_BASE_URL="${GCS_BASE_URL:-https://gcs.ci.openshift.org/gcs/${GCS_BUCKET}/logs}"
 
 # Live periodics are named:
 #   periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-{major}-{minor}
@@ -84,7 +89,7 @@ get_job_executions() {
 
     # Fetch job-history page and extract allBuilds JavaScript array
     local all_builds
-    if ! all_builds=$(curl -fsS --max-time 30 "${PROW_URL}/job-history/gs/test-platform-results/logs/${job_name}" | \
+    if ! all_builds=$(curl -fsS --max-time 30 "${PROW_URL}/job-history/gs/${GCS_BUCKET}/logs/${job_name}" | \
         sed -n 's/.*var allBuilds = \(\[.*\]\);.*/\1/p'); then
         echo '{"items":[]}'
         return 1
@@ -115,7 +120,7 @@ get_job_execution() {
 
     # Fetch job-history page and extract allBuilds JavaScript array
     local all_builds
-    all_builds=$(curl -s "${PROW_URL}/job-history/gs/test-platform-results/logs/${job_name}" | \
+    all_builds=$(curl -s "${PROW_URL}/job-history/gs/${GCS_BUCKET}/logs/${job_name}" | \
         sed -n 's/.*var allBuilds = \(\[.*\]\);.*/\1/p')
 
     if [ -z "${all_builds}" ]; then
@@ -189,7 +194,7 @@ get_artifact_urls() {
 {
   "gcs_path": "${gcs_path}",
   "base_url": "${base_url}",
-  "build_log": "https://storage.googleapis.com/test-platform-results/logs/${job_name}/${job_id}/build-log.txt",
+  "build_log": "https://storage.googleapis.com/${GCS_BUCKET}/logs/${job_name}/${job_id}/build-log.txt",
   "artifacts_dir": "${base_url}"
 }
 EOF
@@ -204,10 +209,13 @@ download_job_directory_gcs() {
     local output_dir="$3"
 
     # GCS path for entire job
-    local gcs_path="gs://test-platform-results/logs/${job_name}/${job_id}/"
+    local gcs_path="gs://${GCS_BUCKET}/logs/${job_name}/${job_id}/"
 
-    # Download entire job directory
-    if ! gcloud storage cp -r "${gcs_path}" "${output_dir}/" 2>&1; then
+    # Download entire job directory. The bucket is public, so read it without
+    # credentials: an authenticated request fails wherever the ambient identity
+    # has no grant on it, e.g. a GKE Workload Identity principal, which Cloud
+    # Storage honours only on buckets with uniform bucket-level access (HTTP 412).
+    if ! CLOUDSDK_AUTH_DISABLE_CREDENTIALS=true gcloud storage cp -r "${gcs_path}" "${output_dir}/" 2>&1; then
         echo "ERROR: Failed to download job directory from ${gcs_path}" >&2
         return 1
     fi

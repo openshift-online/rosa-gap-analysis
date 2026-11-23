@@ -94,6 +94,13 @@ _log_diagnostic() {
 # Usage: _curl_with_retry <url>
 # Returns: Response body on stdout
 # Exit: 0 on success, 1 on failure after all retries exhausted
+#
+# A returned body is always byte-complete. Bash command substitution silently
+# discards NUL bytes, so a response carrying one would be handed to the caller
+# as a shorter, clean-looking string — and a caller that validates the body it
+# receives would be validating something the server never sent. The bytes are
+# counted on the temporary file, before the capture, and a response that cannot
+# survive it is rejected rather than truncated.
 _curl_with_retry() {
     local url="$1"
     local max_attempts=3
@@ -102,6 +109,9 @@ _curl_with_retry() {
     local http_code
     local body
     local tmpfile
+    local total_bytes
+    local text_bytes
+    local nul_count
 
     while [[ $attempt -le $max_attempts ]]; do
         tmpfile=$(mktemp)
@@ -114,21 +124,39 @@ _curl_with_retry() {
             -o "$tmpfile" \
             "$url" 2>/dev/null) || true
 
+        # Count NUL bytes on the file, before the substitution below drops
+        # them. wc and tr are already required by this library, so this adds
+        # no runtime dependency. Fail closed: if the count cannot be taken,
+        # the body is not provably intact, so it is not returned.
+        total_bytes=$(wc -c <"$tmpfile" 2>/dev/null | tr -d '[:space:]' 2>/dev/null) || true
+        text_bytes=$(LC_ALL=C tr -d '\0' <"$tmpfile" 2>/dev/null | wc -c 2>/dev/null | tr -d '[:space:]' 2>/dev/null) || true
+        if [[ "$total_bytes" =~ ^[0-9]+$ ]] && [[ "$text_bytes" =~ ^[0-9]+$ ]]; then
+            nul_count=$((total_bytes - text_bytes))
+        else
+            nul_count="unmeasured"
+        fi
+
         body=$(cat "$tmpfile" 2>/dev/null) || true
         rm -f "$tmpfile"
 
-        # Success: 2xx status with non-empty body
-        if [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && [[ -n "$body" ]]; then
+        # Success: 2xx status, non-empty body, and nothing lost to the capture.
+        if [[ "$http_code" =~ ^2[0-9][0-9]$ ]] && [[ -n "$body" ]] && [[ "$nul_count" == "0" ]]; then
             echo "$body"
             return 0
         fi
 
         # Log failure details for diagnostics
         local body_snippet="${body:0:200}"
+        local failure_detail="URL=${url} HTTP_STATUS=${http_code} RESPONSE=${body_snippet:-<empty>}"
+        if [[ "$nul_count" != "0" ]]; then
+            # The snippet is deliberately dropped here: the body is known to be
+            # mangled, so only the endpoint, the status and the count are named.
+            failure_detail="URL=${url} HTTP_STATUS=${http_code} RESPONSE_NUL_BYTES=${nul_count}"
+        fi
         if command -v log_warning &>/dev/null; then
-            log_warning "API request failed (attempt ${attempt}/${max_attempts}): URL=${url} HTTP_STATUS=${http_code} RESPONSE=${body_snippet:-<empty>}"
+            log_warning "API request failed (attempt ${attempt}/${max_attempts}): ${failure_detail}"
         else
-            echo "Warning: API request failed (attempt ${attempt}/${max_attempts}): URL=${url} HTTP_STATUS=${http_code} RESPONSE=${body_snippet:-<empty>}" >&2
+            echo "Warning: API request failed (attempt ${attempt}/${max_attempts}): ${failure_detail}" >&2
         fi
 
         if [[ $attempt -lt $max_attempts ]]; then
@@ -245,27 +273,259 @@ validate_stable_belongs_to_version() {
     return 0
 }
 
+# Map an untrusted jq `type` result onto a closed whitelist, so a crafted or
+# corrupted response can never inject text into a log line. The case list is
+# the whitelist; anything else collapses to "unknown".
+# Usage: _safe_json_type "$(... | jq -r 'type')" → object|array|string|number|boolean|null|unknown
+_safe_json_type() {
+    # Echo the matched literal rather than the input, so the result is
+    # independent of the input even under `shopt -s nocasematch`.
+    case "$1" in
+        object) echo "object" ;;
+        array) echo "array" ;;
+        string) echo "string" ;;
+        number) echo "number" ;;
+        boolean) echo "boolean" ;;
+        null) echo "null" ;;
+        *) echo "unknown" ;;
+    esac
+}
+
+# Map an untrusted value onto a non-negative integer, or "unknown". Keeps
+# counts and lengths safe to interpolate into a diagnostic.
+# Usage: _safe_count "$(... | jq -r 'length')"
+_safe_count() {
+    if [[ "$1" =~ ^[0-9]+$ ]]; then
+        echo "$1"
+    else
+        echo "unknown"
+    fi
+}
+
+# True when the body carries a number JSON cannot express.
+#
+# jq's parser is a superset of JSON: it accepts the bare literals `Infinity`,
+# `-Infinity`, `NaN` and `nan`, which RFC 8259 does not allow. A body using
+# them therefore parses cleanly and reaches the extract filter, so an exit
+# status alone cannot stand in for "this was JSON".
+#
+# A finite literal too large for a double (1e400) reads back as infinite and is
+# rejected too. That is intentional: this endpoint returns version strings and
+# dates, so such a value is already an unexpected payload, and a number that
+# cannot be read back faithfully is not one to resolve a version from.
+#
+# Scalars are inspected as parse events (`--stream`) rather than by walking
+# the built value, because object construction is lossy: on a duplicate key
+# the later value replaces the earlier one, so
+# `{"ga_dates":{"4.21":"d"},"extra":Infinity,"extra":0}` would present a
+# wholly finite object to a recursive walk while still being a body no JSON
+# parser should have accepted. The event stream reports both values.
+#
+# Every event is consumed, deliberately, instead of stopping at the first hit.
+# A short-circuiting `any` lets jq exit while printf still has data to write;
+# printf then takes SIGPIPE, and under `pipefail` — which scripts/gap-all.sh
+# sets — the pipeline yields 141 even though the detection succeeded. The
+# caller reads that as "no non-finite number" and the body sails through. So
+# the win from stopping early is exactly the bug: `reduce` reads to the end.
+#
+# Prints nothing. Exit: 0 when a non-finite number is present, 1 otherwise
+# (including when the body does not parse at all — the caller's parse probe
+# owns that case, and jq's own stderr stays suppressed either way).
+# Usage: _json_has_non_finite_number <body>
+_json_has_non_finite_number() {
+    # A --stream event is [path, value] for a scalar and [path] for a close.
+    printf '%s' "$1" | jq -e -n --stream \
+        'reduce inputs as $e (false;
+            . or ($e | length == 2
+                  and (.[1] | type == "number")
+                  and (.[1] | isinfinite or isnan)))' \
+        >/dev/null 2>&1
+}
+
+# Classify why a Sippy payload did not yield a GA version.
+# Returns a fixed phrase built only from literals, whitelisted JSON type names
+# and integers — never the response body, a body excerpt, headers or jq's
+# stderr, any of which can echo response content into a CI artifact.
+# root_rc/doc_count come from the caller's parse probe, so the exit status is
+# judged before the output is sanitized.
+# Usage: _classify_ga_dates_failure <body> <jq-exit-code> <root-rc> <doc-count>
+_classify_ga_dates_failure() {
+    local body="$1"
+    local jq_status="$2"
+    local root_rc
+    local doc_count
+    local bytes
+    local root_type
+    local has_ga_dates
+    local ga_dates_type
+    local key_count
+
+    # Sanitize here too: the function is export -f'd, so it must not rely on a
+    # caller having validated these before interpolating them into a log line.
+    jq_status=$(_safe_count "$jq_status")
+    root_rc=$(_safe_count "$3")
+    doc_count=$(_safe_count "$4")
+
+    # 126/127 are the shell's "not executable"/"not found" statuses. Probe the
+    # command as well: a jq shim can exit 127 while jq is genuinely on PATH,
+    # and an unreadable jq exits 126 on a payload that is perfectly valid.
+    if ! command -v jq >/dev/null 2>&1 || [[ "$jq_status" == "126" ]] || [[ "$jq_status" == "127" ]]; then
+        echo "jq is unavailable or not executable (exit ${jq_status})"
+        return 0
+    fi
+
+    # Trailing newlines were already stripped by the capturing substitutions.
+    bytes=$(_safe_count "$(printf '%s' "$body" | wc -c 2>/dev/null | tr -d '[:space:]' 2>/dev/null)")
+
+    # jq exits 0 and prints nothing on blank input, which would otherwise be
+    # reported as invalid JSON alongside a success exit code.
+    if [[ -z "${body//[[:space:]]/}" ]]; then
+        echo "response body is blank (${bytes} byte(s))"
+        return 0
+    fi
+
+    # jq streams values as it reads them, so output alone does not prove the
+    # whole body parsed: a trailing-garbage payload prints a type and then
+    # fails. Judge the probe's exit status first, before any sanitized output.
+    if [[ "$root_rc" != "0" ]]; then
+        echo "response is not a single valid JSON document (jq exit ${root_rc}, ${bytes} byte(s))"
+        return 0
+    fi
+
+    # A JSON *stream* parses cleanly but is still not the single object this
+    # endpoint is expected to return.
+    if [[ "$doc_count" != "1" ]]; then
+        echo "response holds ${doc_count} JSON document(s), expected exactly 1 (${bytes} byte(s))"
+        return 0
+    fi
+
+    # jq accepts the non-standard literals Infinity, -Infinity and NaN, so a
+    # clean exit status above does not by itself mean the body was JSON.
+    # Recomputed here rather than passed in: unlike the exit status, this is a
+    # boolean the function can establish for itself from the body.
+    if _json_has_non_finite_number "$body"; then
+        # Kept terse: every diagnostic line stays under the 200-char bound the
+        # tests pin, and this one already sits close to it.
+        echo "response contains a non-finite number (${bytes} byte(s))"
+        return 0
+    fi
+
+    root_type=$(_safe_json_type "$(printf '%s' "$body" | jq -r 'type' 2>/dev/null)")
+    if [[ "$root_type" != "object" ]]; then
+        echo "response root is JSON ${root_type}, expected object (${bytes} byte(s))"
+        return 0
+    fi
+
+    # `|| true` keeps this safe if a caller enables `shopt -s inherit_errexit`.
+    has_ga_dates=$(printf '%s' "$body" | jq -r 'has("ga_dates")' 2>/dev/null) || true
+    if [[ "$has_ga_dates" != "true" ]]; then
+        echo "response has no ga_dates field (${bytes} byte(s))"
+        return 0
+    fi
+
+    ga_dates_type=$(_safe_json_type "$(printf '%s' "$body" | jq -r '.ga_dates | type' 2>/dev/null)")
+    if [[ "$ga_dates_type" != "object" ]]; then
+        echo "ga_dates is JSON ${ga_dates_type}, expected object (${bytes} byte(s))"
+        return 0
+    fi
+
+    key_count=$(_safe_count "$(printf '%s' "$body" | jq -r '.ga_dates | keys | length' 2>/dev/null)")
+    if [[ "$key_count" == "0" ]]; then
+        echo "ga_dates is an empty object (${bytes} byte(s))"
+        return 0
+    fi
+
+    echo "ga_dates holds ${key_count} key(s), at least one of which is not a numeric version"
+}
+
 # Get the latest GA (generally available) OpenShift version
 # Usage: get_latest_ga_version
 # Returns: Version string (e.g., "4.21") or empty string on failure
 # Exit: 0 on success, 1 on failure
+#
+# The fetch and the parse are separate stages with separate diagnostics. A
+# successful HTTP response whose payload cannot be parsed is reported as a
+# parse failure rather than being folded into the fetch error, so a CI
+# artifact alone distinguishes an unreachable API from an unexpected payload.
+# jq's stderr stays suppressed because it can quote the response; its exit
+# code and a fixed classification are reported instead. That guarantee covers
+# the parse stage added here; the fetch stage keeps _curl_with_retry's own
+# long-standing HTTP logging unchanged.
 get_latest_ga_version() {
+    local body
     local version
+    local jq_status
+    local root_types
+    local root_rc
+    local doc_count
+    local non_finite
+    local reason
 
-    version=$(_curl_with_retry "${SIPPY_API}" | \
-        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null)
+    # Stage 1: fetch. _curl_with_retry logs its own HTTP-level diagnostics.
+    if ! body=$(_curl_with_retry "${SIPPY_API}"); then
+        _log_ga_version_failure "request to ${SIPPY_API} returned no usable response"
+        return 1
+    fi
 
-    if [[ -z "$version" ]] || [[ "$version" == "null" ]]; then
-        if command -v log_error &>/dev/null; then
-            log_error "Failed to fetch latest GA version from Sippy API"
-        else
-            echo "Error: Failed to fetch latest GA version" >&2
-        fi
+    # Stage 2a: the body must parse completely, as exactly one JSON document,
+    # before any value read out of it can be trusted. jq emits values as it
+    # reads them, so it prints a type and then fails on trailing garbage, and
+    # prints one line per document on a JSON stream. Capture the exit status
+    # here, before the output is sanitized, and count the documents.
+    if root_types=$(printf '%s' "$body" | jq -r 'type' 2>/dev/null); then
+        root_rc=0
+    else
+        root_rc=$?
+    fi
+    # Counted with wc rather than grep so this adds no new runtime dependency.
+    if [[ -z "$root_types" ]]; then
+        doc_count=0
+    else
+        doc_count=$(_safe_count "$(printf '%s\n' "$root_types" | wc -l 2>/dev/null | tr -d '[:space:]' 2>/dev/null)")
+    fi
+
+    # Stage 2a (cont.): a clean exit status is necessary but not sufficient.
+    # jq also accepts Infinity/-Infinity/NaN, which JSON does not, so the body
+    # can parse and still not be JSON. Probe for them separately.
+    if _json_has_non_finite_number "$body"; then
+        non_finite=1
+    else
+        non_finite=0
+    fi
+
+    # Stage 2b: extract. Keep jq's exit code; `if` keeps `set -e` from aborting.
+    if version=$(printf '%s' "$body" | \
+        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null); then
+        jq_status=0
+    else
+        jq_status=$?
+    fi
+
+    # root_rc is redundant in practice (both jq runs parse the same stream, so
+    # a probe failure implies an extract failure) but is kept as an explicit,
+    # independent "the body parsed completely" precondition.
+    if [[ $root_rc -ne 0 ]] || [[ "$doc_count" != "1" ]] || [[ $non_finite -ne 0 ]] || \
+       [[ $jq_status -ne 0 ]] || [[ -z "$version" ]] || [[ "$version" == "null" ]]; then
+        reason=$(_classify_ga_dates_failure "$body" "$jq_status" "$root_rc" "$doc_count")
+        _log_ga_version_failure "could not read ga_dates from ${SIPPY_API}: ${reason}"
         return 1
     fi
 
     echo "$version"
     return 0
+}
+
+# Report a GA-version resolution failure: the long-standing error line that
+# marks the failure, followed by one bounded, non-sensitive diagnostic naming
+# the stage that failed.
+# Usage: _log_ga_version_failure <fixed-classification>
+_log_ga_version_failure() {
+    if command -v log_error &>/dev/null; then
+        log_error "Failed to fetch latest GA version from Sippy API"
+    else
+        echo "Error: Failed to fetch latest GA version" >&2
+    fi
+    _log_diagnostic "GA version resolution failed: $1"
 }
 
 # Fetch all accepted release streams (cached to avoid multiple API calls)
@@ -1185,6 +1445,11 @@ resolve_openshift_version() {
 export -f _curl_with_retry
 export -f _log_diagnostic
 export -f _log_stream_lookup_failure
+export -f _safe_json_type
+export -f _safe_count
+export -f _json_has_non_finite_number
+export -f _classify_ga_dates_failure
+export -f _log_ga_version_failure
 export -f stable_stream_for_version
 export -f dev_preview_stream_for_version
 export -f extract_minor_version

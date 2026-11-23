@@ -24,3 +24,7 @@ gap_ocm_version_gate = _load_script_module(
     "gap_ocm_version_gate",
     "gap-ocm-version-gate.py",
 )
+gap_versions_channels = _load_script_module(
+    "gap_versions_channels",
+    "gap-versions-channels.py",
+)

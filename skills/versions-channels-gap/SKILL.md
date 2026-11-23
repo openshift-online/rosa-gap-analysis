@@ -10,6 +10,7 @@ compatibility:
   required_tools:
     - python3
     - rosa
+    - jq
 ---
 
 # Versions & Channels Gap Analysis
@@ -27,6 +28,7 @@ Analyze OCP version availability across release channels and validate marketplac
 
 1. **Channel Availability** - Which OCM channels (candidate/fast/stable/eus for GA, candidate-only for pre-GA) contain the baseline and target versions
 2. **Marketplace Availability** - ROSA Classic (OCM API), ROSA HCP (ROSA CLI), OSD GCP (OCM API, 4.x only — skipped for 5.x)
+3. **Channel Query Provenance** (diagnostics only, does not affect the result) - For every channel query: which CLI answered (`ocm` or the `rosa` fallback), whether the query succeeded but returned no version rows upstream (`ok_empty_upstream`; for the ROSA fallback this also covers output whose rows no longer parse) versus returned versions that the local minor-version filter dropped (`ok_all_filtered`), and sanitized error kinds
 
 ## Workflow
 
@@ -65,6 +67,11 @@ firefox reports/gap-analysis-versions-channels_*.html
 # Parse JSON report
 jq '.summary' reports/gap-analysis-versions-channels_*.json
 jq '.marketplace' reports/gap-analysis-versions-channels_*.json
+
+# Why is a channel empty? (query provenance — diagnostics only)
+jq '.summary.channel_query_evidence' reports/gap-analysis-versions-channels_*.json
+jq '.channel_availability.target.channels | map_values(.query_evidence)' \
+  reports/gap-analysis-versions-channels_*.json
 ```
 
 ## Output
@@ -99,7 +106,7 @@ Exit code: `0` on PASS, `1` on validation FAIL (GA targets missing from required
 
 ## Data Sources
 
-- **OCM CLI**: `ocm list versions` (channel availability, ROSA Classic/OSD GCP marketplace) — requires `ocm login --token=<token>`, graceful fallback if absent
+- **OCM CLI**: `ocm get /api/clusters_mgmt/v1/versions` (channel availability, ROSA Classic/OSD GCP marketplace; this is the `query.command`/`query.endpoint` recorded in the report's channel query provenance) — requires `ocm login --token=<token>`, graceful fallback if absent
 - **ROSA CLI**: `rosa list versions --hosted-cp` (ROSA HCP availability)
 - **Sippy API**: `https://sippy.dptools.openshift.org/api/releases` (GA version detection)
 

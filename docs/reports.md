@@ -105,6 +105,7 @@ Generates:
 - **Check 6:** Versions & Channels validation results
 - Channel availability across OCM channels (candidate/fast/stable/eus)
 - Marketplace availability (ROSA Classic, ROSA HCP, OSD GCP)
+- Channel query provenance (`summary.channel_query_evidence` and per-channel `query_evidence`) — which CLI answered, upstream-empty versus locally-filtered counts, and sanitized error kinds; diagnostics only, see [validation-checks.md](validation-checks.md#check-6-versions--channels)
 - Timestamp and version information
 
 ### OCM Version Gate Gap Analysis (Check 7)

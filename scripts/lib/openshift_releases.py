@@ -2,6 +2,7 @@
 """OpenShift release version utilities using release streams API."""
 
 import json
+import re
 import sys
 from urllib.request import urlopen, Request
 from urllib.error import URLError
@@ -15,6 +16,18 @@ RELEASE_STREAM_BASE = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releas
 
 # Number of versions included in a resolution-failure diagnostic
 _DIAGNOSTIC_SAMPLE_SIZE = 10
+
+# Sippy keys ga_dates by release LINE, and not every line is OpenShift: the live
+# payload carries `logging-6.6` beside 3.11/4.x/5.x. Only a numeric major.minor
+# key is an OpenShift version this resolver can order
+# (mirrors _JQ_GA_DATES_OCP_KEYS in openshift-releases.sh).
+#
+# Anchored with \A and \Z, not ^ and `$`: `$` also matches before a trailing
+# newline, which would let "4.21\n" through as a version. [0-9] rather than \d
+# keeps the class ASCII, so the two resolvers accept the same keys. The pattern
+# anchors itself so it stays correct under match()/search() as well as the
+# fullmatch() below.
+_MAJOR_MINOR_RE = re.compile(r'\A[0-9]+\.[0-9]+\Z')
 
 
 def stable_stream_for_version(version):
@@ -110,8 +123,19 @@ def get_latest_ga_version():
         log_error("No GA versions found in Sippy API")
         sys.exit(1)
 
+    # Drop keys that are not OpenShift versions before the numeric sort: one
+    # foreign key (e.g. `logging-6.6`) would otherwise raise ValueError in int()
+    # and take the whole resolution down with it.
+    versions = [version for version in ga_dates if _MAJOR_MINOR_RE.fullmatch(version)]
+    if not versions:
+        # Counts only — the key names come from the API response and are not
+        # echoed into a CI artifact.
+        log_error(f"No OpenShift major.minor GA versions found in Sippy API "
+                  f"({len(ga_dates)} ga_dates key(s), none usable)")
+        sys.exit(1)
+
     # Sort versions and get the latest
-    versions = sorted(ga_dates.keys(), key=lambda v: list(map(int, v.split('.'))))
+    versions.sort(key=lambda v: list(map(int, v.split('.'))))
     return versions[-1]
 
 

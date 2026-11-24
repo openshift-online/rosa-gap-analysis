@@ -24,6 +24,12 @@ from tests.fixtures.accepted_streams import (
     ACCEPTED_STREAMS_EMPTY_5,
     as_json,
 )
+from tests.fixtures.ga_dates import (
+    LIVE_GA_DATES,
+    LIVE_GA_DATES_LATEST,
+    NON_VERSION_KEYS,
+    NO_OPENSHIFT_GA_DATES,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASES_LIB = ROOT / "scripts" / "lib" / "openshift-releases.sh"
@@ -542,12 +548,69 @@ def test_ga_version_reports_empty_ga_dates():
     assert "ga_dates is an empty object" in err
 
 
-def test_ga_version_reports_non_numeric_keys():
-    body = json.dumps({"ga_dates": {"four-twenty": "d", "4.21": "d"}})
+def test_ga_version_ignores_non_openshift_release_lines():
+    """Regression for the 4.20 nightly failure.
+
+    Sippy keys ga_dates by release LINE, and not every line is OpenShift: the
+    live payload carries `logging-6.6`. `tonumber` on that key aborts the whole
+    filter — jq emits nothing — so one foreign key made the resolver report
+    "could not read ga_dates" while 19 usable minors sat in the response. The
+    fixture is the live payload verbatim.
+    """
+    body = json.dumps({"ga_dates": LIVE_GA_DATES})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == f"GA={LIVE_GA_DATES_LATEST}"
+    assert "Failed to fetch" not in err
+    assert "could not read ga_dates" not in err
+
+
+def test_ga_version_ignores_a_non_numeric_key_beside_valid_ones():
+    """The same rule on a minimal payload, with the numeric ordering still
+    applied to what survives (4.21 over 4.9, not lexically)."""
+    body = json.dumps({"ga_dates": {"four-twenty": "d", "4.21": "d", "4.9": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.21"
+    assert "could not read ga_dates" not in err
+
+
+def test_ga_version_reports_when_no_key_is_a_version():
+    """Fail-closed is preserved: with nothing version-shaped left there is no
+    GA version to resolve, and the diagnostic says so in counts alone."""
+    body = json.dumps({"ga_dates": NO_OPENSHIFT_GA_DATES})
     rc, out, err = run_with_stubbed_curl(body)
     assert rc == 0, err
     assert out == "RC=1"
-    assert "ga_dates holds 2 key(s), at least one of which is not a numeric version" in err
+    assert (
+        f"ga_dates holds {len(NO_OPENSHIFT_GA_DATES)} key(s), "
+        "none a numeric major.minor version"
+    ) in err
+    # Counts only — the offending keys come from the response.
+    for key in NO_OPENSHIFT_GA_DATES:
+        assert key not in err
+
+
+@pytest.mark.parametrize("key", NON_VERSION_KEYS)
+def test_ga_version_rejects_keys_that_are_not_major_minor(key):
+    """Only a bare numeric major.minor is an OpenShift GA line; a near-miss
+    must be ignored rather than resolved or passed to tonumber."""
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": {key: "d"}}))
+    assert rc == 0, err
+    assert out == "RC=1"
+    assert "ga_dates holds 1 key(s), none a numeric major.minor version" in err
+
+
+def test_ga_version_is_never_a_key_with_trailing_whitespace():
+    """`$` matches before a trailing newline in Oniguruma, so "4.21\\n" slipped
+    past a `^...$` select and then aborted the whole filter on tonumber — the
+    original failure mode, one key shape over. The real key must win instead.
+    """
+    body = json.dumps({"ga_dates": {"4.20": "d", "4.21\n": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.20"
+    assert "could not read ga_dates" not in err
 
 
 def test_ga_version_reports_blank_response_body():
@@ -758,8 +821,10 @@ def test_ga_version_separates_transport_failure_from_parse_failure():
     assert "could not read ga_dates" not in err
 
 
-# One body per classification branch, each carrying the sentinel, so a body
-# excerpt added to any single branch is caught rather than only the first.
+# One body per body-reachable classification branch, each carrying the
+# sentinel, so a body excerpt added to any single branch is caught rather than
+# only the first. The defensive default no response can reach is covered by
+# test_classification_fallback_stays_bounded_and_leak_free.
 _SENTINEL = "SENTINEL-must-never-reach-a-log-9f2c1b"
 _SENTINEL_BODIES = {
     "not-json": f"<html>{_SENTINEL}</html>",
@@ -767,7 +832,7 @@ _SENTINEL_BODIES = {
     "absent-ga-dates": json.dumps({"unexpected": _SENTINEL, "note": _SENTINEL}),
     "wrong-ga-dates-type": json.dumps({"ga_dates": _SENTINEL}),
     "empty-ga-dates": json.dumps({"ga_dates": {}, "note": _SENTINEL}),
-    "non-numeric-keys": json.dumps({"ga_dates": {_SENTINEL: "d"}}),
+    "no-version-keys": json.dumps({"ga_dates": {_SENTINEL: "d"}}),
     "trailing-garbage": json.dumps({"ga_dates": {"4.21": "d"}}) + f" {_SENTINEL}",
     "multi-document": json.dumps({"ga_dates": {"4.20": "d"}})
     + " "
@@ -804,6 +869,45 @@ def test_ga_version_diagnostic_is_deterministic_and_names_only_the_endpoint():
     assert "?" not in err
 
 
+def test_classification_fallback_stays_bounded_and_leak_free():
+    """The last branch of _classify_ga_dates_failure is a defensive default: a
+    version-shaped key always sorts, so get_latest_ga_version cannot reach it
+    and no response body can drive it. It is called directly instead, exactly
+    as the resolver calls it, so it is still held to the two rules every other
+    branch is held to — no response content, and a bounded line.
+    """
+    body = json.dumps({"ga_dates": {"4.21": "d"}, "note": _SENTINEL})
+    rc, out, err = run_resolver(
+        f"reason=$(_classify_ga_dates_failure {shlex.quote(body)} 0 0 1); "
+        '_log_ga_version_failure "could not read ga_dates from ${SIPPY_API}: ${reason}"',
+        streams={},
+    )
+    assert rc == 0, err
+    assert "ga_dates holds 1 key(s), 1 version-shaped, none usable" in err
+    assert _SENTINEL not in err
+    assert "4.21" not in err
+    lines = [line for line in err.splitlines() if line.strip()]
+    assert len(lines) == 2
+    assert all(len(line) < 200 for line in lines)
+
+
+def test_jq_filters_travel_with_the_exported_functions():
+    """_classify_ga_dates_failure and get_latest_ga_version are `export -f`'d,
+    so the jq programs they now depend on have to be exported too. Left
+    unexported, a child shell hands jq an empty program: the classifier
+    reports "unknown" instead of classifying, and the resolver cannot read a
+    payload that is perfectly good.
+    """
+    body = json.dumps({"ga_dates": NO_OPENSHIFT_GA_DATES})
+    inner = f"_classify_ga_dates_failure {shlex.quote(body)} 0 0 1"
+    rc, out, err = run_resolver("bash -c " + shlex.quote(inner), streams={})
+    assert rc == 0, err
+    assert out == (
+        f"ga_dates holds {len(NO_OPENSHIFT_GA_DATES)} key(s), "
+        "none a numeric major.minor version"
+    )
+
+
 def test_safe_helpers_reject_untrusted_values():
     """The sanitizers are the whole leak defence, so pin both directions."""
     rc, out, err = run_resolver(
@@ -831,6 +935,24 @@ def test_caller_path_surfaces_the_parse_classification():
     assert out == "RC=1", err
     assert "Failed to fetch latest GA version from Sippy API" in err
     assert "response has no ga_dates field" in err
+
+
+def test_caller_path_resolves_through_the_live_ga_dates_payload():
+    """End-to-end over the path gap-all.sh takes: the unmodified live payload,
+    foreign key and all, must get past GA resolution and produce a comparison.
+    This is the job step that went red, so it is asserted whole rather than
+    only at get_latest_ga_version.
+    """
+    rc, out, err = run_with_stubbed_curl(
+        json.dumps({"ga_dates": LIVE_GA_DATES}),
+        streams_body=as_json(ACCEPTED_STREAMS),
+        call=GAP_ALL_CONSUMER,
+    )
+    assert rc == 0, err
+    assert "REACHED_NEXT_STEP" in out
+    assert "BASELINE=5.0.0" in out
+    assert "TARGET=5.0.1" in out
+    assert "Failed to fetch latest GA version from Sippy API" not in err
 
 
 def test_caller_path_still_resolves_when_sippy_is_well_formed():

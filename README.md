@@ -108,8 +108,11 @@ Quick curl commands to check current OpenShift versions from accepted release st
 
 ```bash
 # Get latest GA version from Sippy
+# ga_dates is keyed by release line and not every line is OpenShift (e.g.
+# "logging-6.6"), so non-version keys are dropped before the numeric sort.
 curl -s https://sippy.dptools.openshift.org/api/releases | \
-  jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last'
+  jq -r '.ga_dates | keys | map(select(test("\\A[0-9]+\\.[0-9]+\\z")))
+         | sort_by(split(".") | map(tonumber)) | last'
 
 # Get latest stable for GA line (e.g., 4.21.x)
 curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \

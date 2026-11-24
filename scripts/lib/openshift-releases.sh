@@ -26,6 +26,26 @@ readonly _DIAGNOSTIC_SAMPLE_SIZE=10
 # it (mirrors is_prerelease_version() in openshift_releases.py).
 readonly _JQ_NOT_PRERELEASE='((contains("-rc.") or contains("-ec.")) | not)'
 
+# Sippy keys .ga_dates by release LINE, and not every line is OpenShift: the
+# live payload carries `logging-6.6` beside 3.11/4.x/5.x. A non-version key has
+# no place in a version ordering, and `tonumber` on one aborts the whole filter
+# — jq emits no output at all — so a single foreign key made the resolver
+# report "could not read ga_dates" while 19 usable minors sat in the response.
+# Select the OpenShift major.minor keys first; sort only those numerically.
+#
+# Anchored with \A and \z, not ^ and $: Oniguruma's $ matches before a trailing
+# newline, so "4.21\n" would pass the select and then abort the very filter
+# this exists to protect. [0-9] rather than \d keeps the class ASCII, matching
+# the Python mirror (_MAJOR_MINOR_RE in openshift_releases.py).
+#
+# Exported, unlike the constants above, because an unset jq program is not a
+# degraded diagnostic but a silent wrong answer: the readers are `export -f`'d,
+# and in a child shell that did not source this file an empty filter makes jq
+# reject a perfectly good payload.
+export _JQ_GA_DATES_OCP_KEYS='.ga_dates | keys | map(select(test("\\A[0-9]+\\.[0-9]+\\z")))'
+export _JQ_GA_DATES_LATEST="${_JQ_GA_DATES_OCP_KEYS}"' | sort_by(split(".") | map(tonumber)) | last'
+readonly _JQ_GA_DATES_OCP_KEYS _JQ_GA_DATES_LATEST
+
 # The accepted-streams API publishes one stable and one dev-preview stream per
 # MAJOR version (4-stable, 5-stable, 4-dev-preview, 5-dev-preview). Always derive
 # the stream name from the version being resolved — hardcoding "4-stable" makes
@@ -359,6 +379,7 @@ _classify_ga_dates_failure() {
     local has_ga_dates
     local ga_dates_type
     local key_count
+    local ocp_key_count
 
     # Sanitize here too: the function is export -f'd, so it must not rely on a
     # caller having validated these before interpolating them into a log line.
@@ -435,7 +456,21 @@ _classify_ga_dates_failure() {
         return 0
     fi
 
-    echo "ga_dates holds ${key_count} key(s), at least one of which is not a numeric version"
+    # Foreign keys are now ignored rather than fatal, so the only key-shaped
+    # failure left is "nothing in here is an OpenShift version". Report it with
+    # counts: naming the offending keys would echo response content into a CI
+    # artifact, which every other branch here is careful not to do.
+    ocp_key_count=$(_safe_count "$(printf '%s' "$body" | \
+        jq -r "${_JQ_GA_DATES_OCP_KEYS} | length" 2>/dev/null)")
+    if [[ "$ocp_key_count" == "0" ]]; then
+        echo "ga_dates holds ${key_count} key(s), none a numeric major.minor version"
+        return 0
+    fi
+
+    # Defensive default: a version-shaped key always sorts, so this is not
+    # reachable through get_latest_ga_version. Kept short for the same reason
+    # as the branch above — every diagnostic line stays under 200 chars.
+    echo "ga_dates holds ${key_count} key(s), ${ocp_key_count} version-shaped, none usable"
 }
 
 # Get the latest GA (generally available) OpenShift version
@@ -493,9 +528,12 @@ get_latest_ga_version() {
         non_finite=0
     fi
 
-    # Stage 2b: extract. Keep jq's exit code; `if` keeps `set -e` from aborting.
+    # Stage 2b: extract the newest OpenShift minor. Foreign keys are dropped
+    # before the sort (see _JQ_GA_DATES_LATEST); an empty selection yields
+    # `null`, which the guard below fails on. Keep jq's exit code; `if` keeps
+    # `set -e` from aborting.
     if version=$(printf '%s' "$body" | \
-        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null); then
+        jq -r "${_JQ_GA_DATES_LATEST}" 2>/dev/null); then
         jq_status=0
     else
         jq_status=$?

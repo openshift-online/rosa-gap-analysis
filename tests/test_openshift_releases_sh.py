@@ -10,6 +10,7 @@ is contacted.
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -965,3 +966,84 @@ def test_caller_path_resolves_against_a_multi_product_sippy_payload():
     assert "REACHED_NEXT_STEP" in out
     assert "BASELINE=5.0.0" in out
     assert "TARGET=5.0.1" in out
+
+
+# --- README quick-reference parity -----------------------------------------
+#
+# README.md ships a curl|jq one-liner answering the same question as
+# get_latest_ga_version, so a reader who runs it must get the resolver's
+# answer. It once applied `// "OCP"` to the product value, which reads a
+# present `false` as "absent" and so kept a release both resolvers drop.
+
+README = ROOT / "README.md"
+_README_MARKER = "# Get latest GA version from Sippy"
+
+_JQ_HAS_REGEX = subprocess.run(
+    ["jq", "-ne", '"4" | test("^[0-9]$")'], capture_output=True, check=False
+).returncode == 0
+
+
+def _readme_latest_ga_program():
+    """Extract the jq program from the README's latest-GA quick reference."""
+    text = README.read_text(encoding="utf-8")
+    assert _README_MARKER in text, "README lost its latest-GA quick-reference command"
+    match = re.search(r"jq -r '([^']*)'", text.split(_README_MARKER, 1)[1])
+    assert match, "could not extract the jq program from the README snippet"
+    return match.group(1)
+
+
+def _run_jq(program, body):
+    proc = subprocess.run(
+        ["jq", "-r", program], input=body, capture_output=True, text=True, check=False
+    )
+    return proc.returncode, proc.stdout.strip(), proc.stderr
+
+
+def _resolver_latest_ga(body):
+    """Run the shipped _JQ_OCP_GA_VERSIONS program over the same payload."""
+    script = f'set -euo pipefail\nsource "{RELEASES_LIB}"\njq -r "${{_JQ_OCP_GA_VERSIONS}} | last"\n'
+    proc = subprocess.run(
+        ["bash", "-c", script], input=body, capture_output=True, text=True, check=False
+    )
+    return proc.returncode, proc.stdout.strip(), proc.stderr
+
+
+# Each payload names a way the two could drift apart.
+_README_PARITY_PAYLOADS = {
+    "live-shape": MIXED_PRODUCT_RELEASES,
+    "no-ocp-release": NO_OCP_GA_RELEASES,
+    "no-release-attrs": {"ga_dates": {"4.19": "d", "5.0": "d"}},
+    "numeric-order": {"ga_dates": {"4.9": "d", "4.20": "d", "4.10": "d"}},
+    "okd-with-version-shaped-key": {
+        "ga_dates": {"4.19": "d", "9.9": "d"},
+        "release_attrs": {"9.9": {"product": "OKD"}},
+    },
+    # The regression: `false` is a stated product, not an absent one.
+    "falsy-product": {
+        "ga_dates": {"4.19": "d", "9.9": "d"},
+        "release_attrs": {"9.9": {"product": False}},
+    },
+    "null-product": {
+        "ga_dates": {"4.19": "d"},
+        "release_attrs": {"4.19": {"product": None}},
+    },
+    "unusable-release-attrs": {"ga_dates": {"4.19": "d"}, "release_attrs": "nope"},
+    "unusable-entry": {"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": "nope"}},
+    "degenerate-keys": {"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}},
+}
+
+
+@pytest.mark.skipif(not _JQ_HAS_REGEX, reason="README snippet needs a regex-enabled jq")
+@pytest.mark.parametrize("label", sorted(_README_PARITY_PAYLOADS))
+def test_readme_quick_reference_matches_the_resolver(label):
+    body = json.dumps(_README_PARITY_PAYLOADS[label])
+
+    readme_rc, readme_out, readme_err = _run_jq(_readme_latest_ga_program(), body)
+    resolver_rc, resolver_out, resolver_err = _resolver_latest_ga(body)
+
+    assert readme_rc == 0, f"README snippet failed on {label}: {readme_err}"
+    assert resolver_rc == 0, f"resolver failed on {label}: {resolver_err}"
+    assert readme_out == resolver_out, (
+        f"README snippet and resolver disagree on {label}: "
+        f"{readme_out!r} vs {resolver_out!r}"
+    )

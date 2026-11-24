@@ -635,11 +635,19 @@ def test_ga_version_obeys_a_product_that_is_present_but_falsy():
     assert "none of them a GA'd OCP version" in err
 
 
-def test_ga_version_skips_degenerate_keys():
-    """Mirrors the Python suite: "" survives `split(".") | all(...)` vacuously,
-    so the empty split result has to be rejected explicitly."""
-    body = json.dumps({"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}})
-    rc, out, err = run_with_stubbed_curl(body)
+@pytest.mark.parametrize("extra_keys", [
+    # "" survives `split(".") | all(...)` vacuously, so the empty split result
+    # has to be rejected explicitly.
+    ["", "4.", "4.x"],
+    # Non-ASCII digits: jq's explode/48-57 test rejects these, and the Python
+    # twin needs an isascii() guard to agree. Pinned on both sides.
+    ["４.１９", "4.1²"],
+])
+def test_ga_version_skips_degenerate_keys(extra_keys):
+    """Mirrors the Python suite's unexpected-payload table."""
+    ga_dates = {"4.19": "d"}
+    ga_dates.update({key: "d" for key in extra_keys})
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": ga_dates}))
     assert rc == 0, err
     assert out == "GA=4.19"
 

@@ -398,12 +398,17 @@ class GAReadinessValidator:
         regex_passed = bool(re.search(pattern, content))
         regex_status = "PASS" if regex_passed else "FAIL"
 
-        # Fetch GA dates from Sippy API to determine version reference date
+        # Fetch GA dates from Sippy API to determine version reference date.
+        # fetch_sippy_ga_dates() exits on an unreachable or unexpected Sippy
+        # response, which is right for version resolution but not here: this
+        # lookup only refines a reference date, and the fallback below already
+        # handles not having one. SystemExit is a BaseException, so plain
+        # `except Exception` would let it abort the whole SOP check.
         ga_dates = {}
         try:
             from openshift_releases import fetch_sippy_ga_dates
             ga_dates = fetch_sippy_ga_dates() or {}
-        except Exception:
+        except (Exception, SystemExit):
             pass
 
         ga_date_str = ga_dates.get(major_minor)

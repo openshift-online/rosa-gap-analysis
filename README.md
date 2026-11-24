@@ -112,9 +112,9 @@ Quick curl commands to check current OpenShift versions from accepted release st
 # sorting the raw key set feeds a non-version key to tonumber and fails.
 # A release absent from release_attrs is treated as OCP, as the resolvers do.
 curl -s https://sippy.dptools.openshift.org/api/releases | \
-  jq -r '(.release_attrs // {}) as $a | .ga_dates | keys
+  jq -r '((.release_attrs | objects) // {}) as $a | .ga_dates | keys
          | map(select(test("^[0-9]+([.][0-9]+)*$")
-                      and (($a[.].product // "OCP") == "OCP")))
+                      and ((($a[.] | objects | .product) // "OCP") == "OCP")))
          | sort_by(split(".") | map(tonumber)) | last'
 
 # Get latest stable for GA line (e.g., 4.21.x)

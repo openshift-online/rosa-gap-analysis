@@ -129,6 +129,10 @@ def test_latest_ga_fails_when_no_ocp_release_has_ga(monkeypatch, capsys):
     ({"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": {"product": False}}}, []),
     # Degenerate keys are skipped, never fed to int().
     ({"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}}, ["4.19"]),
+    # Non-ASCII digits are skipped too. str.isdigit() accepts them, and int()
+    # accepts fullwidth ones while raising on a superscript, so without the
+    # ASCII test this both diverges from jq's 48-57 check and can raise.
+    ({"ga_dates": {"4.19": "d", "４.１９": "d", "4.1²": "d"}}, ["4.19"]),
     # A non-mapping ga_dates is ignored, not iterated: iterating the string
     # would offer its characters as versions and resolve "9".
     ({"ga_dates": "4.19"}, []),

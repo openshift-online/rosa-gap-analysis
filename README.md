@@ -113,9 +113,11 @@ Quick curl commands to check current OpenShift versions from accepted release st
 # A release absent from release_attrs is treated as OCP, as the resolvers do;
 # a product that is present is obeyed whatever its type, so `// "OCP"` must not
 # be applied to the product value -- that would read `false` as "absent" too.
+# The key test ends at \z, not $: jq's regex engine lets $ match before a
+# trailing newline, so "4.19\n" would reach tonumber and abort the command.
 curl -s https://sippy.dptools.openshift.org/api/releases | \
   jq -r '((.release_attrs | objects) // {}) as $a | .ga_dates | keys
-         | map(select(test("^[0-9]+([.][0-9]+)*$")))
+         | map(select(test("^[0-9]+([.][0-9]+)*\\z")))
          | map(select((($a[.] | objects) // {} | .product) as $product
                       | $product == null or $product == "OCP"))
          | sort_by(split(".") | map(tonumber)) | last'

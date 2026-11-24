@@ -1030,6 +1030,11 @@ _README_PARITY_PAYLOADS = {
     "unusable-release-attrs": {"ga_dates": {"4.19": "d"}, "release_attrs": "nope"},
     "unusable-entry": {"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": "nope"}},
     "degenerate-keys": {"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}},
+    # jq's regex engine lets `$` match before a trailing newline, so a `$`
+    # anchored key test accepts "4.19\n" -- which the resolvers' digit checks
+    # reject -- and the command then dies in tonumber ("19\n"). The clean key
+    # alongside it is what the two must still agree on.
+    "trailing-newline-key": {"ga_dates": {"4.19\n": "d", "4.9": "d"}},
 }
 
 

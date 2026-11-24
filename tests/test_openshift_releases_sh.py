@@ -24,6 +24,11 @@ from tests.fixtures.accepted_streams import (
     ACCEPTED_STREAMS_EMPTY_5,
     as_json,
 )
+from tests.fixtures.sippy_releases import (
+    MIXED_PRODUCT_LATEST_GA,
+    MIXED_PRODUCT_RELEASES,
+    NO_OCP_GA_RELEASES,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 RELEASES_LIB = ROOT / "scripts" / "lib" / "openshift-releases.sh"
@@ -542,12 +547,101 @@ def test_ga_version_reports_empty_ga_dates():
     assert "ga_dates is an empty object" in err
 
 
-def test_ga_version_reports_non_numeric_keys():
+def test_ga_version_reports_no_ocp_release_in_ga_dates():
+    """ga_dates covers every Sippy product, so a populated map need not hold an
+    OCP release. That is a failure, and one the diagnostic must name as such
+    rather than blaming the key format."""
+    body = json.dumps(NO_OCP_GA_RELEASES)
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", "another product's release must not be returned as the OCP GA"
+    assert "ga_dates holds 2 key(s), none of them a GA'd OCP version" in err
+    assert "logging-6.6" not in err and "quay" not in err
+
+
+# --- get_latest_ga_version: OCP-only selection ------------------------------
+#
+# Regression for periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-
+# nightly-4-19: Sippy fills the deprecated ga_dates for every product it
+# tracks, so logging-6.6 (product "OCP Logging") joined the OCP minors there.
+# Sorting the whole key set as OpenShift versions fed "logging-6" to tonumber,
+# and the job failed with "at least one of which is not a numeric version"
+# although every OCP release in the payload was perfectly well formed.
+
+def test_ga_version_ignores_other_products():
+    """The live mix: OCP 4.19/5.0, OCP Logging logging-6.6, OKD 5.0-okd."""
+    rc, out, err = run_with_stubbed_curl(json.dumps(MIXED_PRODUCT_RELEASES))
+    assert rc == 0, err
+    assert out == f"GA={MIXED_PRODUCT_LATEST_GA}"
+    assert "Failed to fetch" not in err
+
+
+def test_ga_version_selects_by_product_not_key_shape():
+    """A non-OCP release with a version-shaped key must still be excluded,
+    which only the product metadata can decide."""
+    body = json.dumps({
+        "ga_dates": {"4.19": "2025-06-17", "9.9": "2026-01-01"},
+        "release_attrs": {"4.19": {"product": "OCP"}, "9.9": {"product": "OKD"}},
+    })
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.19"
+
+
+def test_ga_version_tolerates_an_unreadable_key_beside_a_good_one():
+    """An entry the resolver cannot read is skipped, not treated as a veto on
+    the rest of the map — the exact regression the nightly hit."""
     body = json.dumps({"ga_dates": {"four-twenty": "d", "4.21": "d"}})
     rc, out, err = run_with_stubbed_curl(body)
     assert rc == 0, err
+    assert out == "GA=4.21"
+
+
+def test_ga_version_accepts_a_payload_without_release_attrs():
+    """An older Sippy has no release_attrs; the numeric guard alone decides,
+    exactly as it did before the product filter existed."""
+    body = json.dumps({"ga_dates": {"4.19": "d", "5.0": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=5.0"
+
+
+@pytest.mark.parametrize("release_attrs", [
+    "nope",                      # wrong type for the whole map
+    {"4.19": "nope"},            # wrong type for one release
+    {"4.19": {}},                # present, but no product named
+    {"4.19": {"product": None}},
+])
+def test_ga_version_survives_an_unusable_release_attrs(release_attrs):
+    """release_attrs the filter cannot read must not break selection: fall back
+    to the numeric guard rather than failing the whole resolution."""
+    body = json.dumps({"ga_dates": {"4.19": "d"}, "release_attrs": release_attrs})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.19"
+
+
+def test_ga_version_obeys_a_product_that_is_present_but_falsy():
+    """Only an ABSENT product defaults to OCP. `false` is a stated product, not
+    an unset one, and jq's `//` would quietly read it as unset — which is the
+    one place the two resolver copies could drift apart."""
+    body = json.dumps({
+        "ga_dates": {"4.19": "d"},
+        "release_attrs": {"4.19": {"product": False}},
+    })
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
     assert out == "RC=1"
-    assert "ga_dates holds 2 key(s), at least one of which is not a numeric version" in err
+    assert "none of them a GA'd OCP version" in err
+
+
+def test_ga_version_skips_degenerate_keys():
+    """Mirrors the Python suite: "" survives `split(".") | all(...)` vacuously,
+    so the empty split result has to be rejected explicitly."""
+    body = json.dumps({"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.19"
 
 
 def test_ga_version_reports_blank_response_body():
@@ -767,7 +861,12 @@ _SENTINEL_BODIES = {
     "absent-ga-dates": json.dumps({"unexpected": _SENTINEL, "note": _SENTINEL}),
     "wrong-ga-dates-type": json.dumps({"ga_dates": _SENTINEL}),
     "empty-ga-dates": json.dumps({"ga_dates": {}, "note": _SENTINEL}),
-    "non-numeric-keys": json.dumps({"ga_dates": {_SENTINEL: "d"}}),
+    "no-ocp-release": json.dumps({"ga_dates": {_SENTINEL: "d"}}),
+    # Version-shaped key, so the product value really is read by the filter.
+    "non-ocp-product": json.dumps({
+        "ga_dates": {"9.9": "d"},
+        "release_attrs": {"9.9": {"product": _SENTINEL}},
+    }),
     "trailing-garbage": json.dumps({"ga_dates": {"4.21": "d"}}) + f" {_SENTINEL}",
     "multi-document": json.dumps({"ga_dates": {"4.20": "d"}})
     + " "
@@ -837,6 +936,20 @@ def test_caller_path_still_resolves_when_sippy_is_well_formed():
     """The split must not regress the happy path through the real HTTP stage."""
     rc, out, err = run_with_stubbed_curl(
         json.dumps({"ga_dates": {"4.22": "d", "5.0": "d"}}),
+        streams_body=as_json(ACCEPTED_STREAMS),
+        call=GAP_ALL_CONSUMER,
+    )
+    assert rc == 0, err
+    assert "REACHED_NEXT_STEP" in out
+    assert "BASELINE=5.0.0" in out
+    assert "TARGET=5.0.1" in out
+
+
+def test_caller_path_resolves_against_a_multi_product_sippy_payload():
+    """End-to-end for the reported failure: gap-all.sh's own entry point, over
+    a payload whose ga_dates mixes OCP, OCP Logging and OKD releases."""
+    rc, out, err = run_with_stubbed_curl(
+        json.dumps(MIXED_PRODUCT_RELEASES),
         streams_body=as_json(ACCEPTED_STREAMS),
         call=GAP_ALL_CONSUMER,
     )

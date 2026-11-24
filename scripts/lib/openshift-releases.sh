@@ -26,6 +26,47 @@ readonly _DIAGNOSTIC_SAMPLE_SIZE=10
 # it (mirrors is_prerelease_version() in openshift_releases.py).
 readonly _JQ_NOT_PRERELEASE='((contains("-rc.") or contains("-ec.")) | not)'
 
+# jq program yielding the OCP releases of .ga_dates as an array, oldest first.
+#
+# Sippy serves every product it tracks from one endpoint and fills the
+# deprecated .ga_dates for each release that has a GA date, so the map is not
+# OpenShift-only: the live payload carries "logging-6.6" (product
+# "OCP Logging") next to the OCP minors, and OKD streams sit in .releases the
+# same way. Sorting the raw key set as OpenShift versions therefore hands
+# "logging-6" to tonumber and aborts resolution for an entry this repository
+# never wanted.
+#
+# .release_attrs names the product of each release, so selection is by product
+# rather than by guessing from the key. The numeric-shape test is kept as the
+# parse guard it always was — a key only reaches tonumber once it is known to
+# be dot-separated digits — and is applied first, so a non-version key never
+# reaches the attribute lookup either.
+#
+# A release missing from .release_attrs, or carrying no product, is treated as
+# OCP: an older Sippy without the field then behaves exactly as before, with
+# the numeric guard alone deciding. Only an absent product is defaulted — a
+# product that is present and not "OCP" is dropped whatever its JSON type, so
+# `false` is not quietly read as "unset" the way `//` would read it.
+#
+# Digits are checked with explode rather than test() so the program needs no
+# regex-enabled jq build. The split result must be non-empty: "" | split(".")
+# is [], and `all` over [] is vacuously true, which would let an empty key
+# through.
+#
+# (mirrors _ocp_ga_versions() in openshift_releases.py — keep the two in step)
+readonly _JQ_OCP_GA_VERSIONS='
+def _digits_only: length > 0 and (explode | all(. >= 48 and . <= 57));
+def _numeric_version:
+    type == "string" and (split(".") | length > 0 and all(_digits_only));
+((.release_attrs | objects) // {}) as $attrs
+| (.ga_dates | objects | keys)
+| map(select(_numeric_version))
+| map(select(
+      (($attrs[.] | objects) // {} | .product) as $product
+      | $product == null or $product == "OCP"))
+| sort_by(split(".") | map(tonumber))
+'
+
 # The accepted-streams API publishes one stable and one dev-preview stream per
 # MAJOR version (4-stable, 5-stable, 4-dev-preview, 5-dev-preview). Always derive
 # the stream name from the version being resolved — hardcoding "4-stable" makes
@@ -359,6 +400,7 @@ _classify_ga_dates_failure() {
     local has_ga_dates
     local ga_dates_type
     local key_count
+    local ocp_count
 
     # Sanitize here too: the function is export -f'd, so it must not rely on a
     # caller having validated these before interpolating them into a log line.
@@ -435,13 +477,33 @@ _classify_ga_dates_failure() {
         return 0
     fi
 
-    echo "ga_dates holds ${key_count} key(s), at least one of which is not a numeric version"
+    # ga_dates covers every Sippy product, so a populated map is not in itself
+    # an OCP map. Name the OCP subset: "20 keys, 0 of them OCP" points triage at
+    # the product filter, where "at least one key is not a version" pointed at
+    # the key format and, once logging-6.6 shipped, was simply wrong.
+    ocp_count=$(_safe_count "$(printf '%s' "$body" | \
+        jq -r "${_JQ_OCP_GA_VERSIONS} | length" 2>/dev/null)")
+    if [[ "$ocp_count" == "0" ]]; then
+        echo "ga_dates holds ${key_count} key(s), none of them a GA'd OCP version (${bytes} byte(s))"
+        return 0
+    fi
+
+    # Defensive: with a non-empty OCP subset the extract always yields a
+    # version, so reaching here means the two jq runs disagreed.
+    echo "ga_dates holds ${key_count} key(s), ${ocp_count} OCP, no version read (${bytes} byte(s))"
 }
 
 # Get the latest GA (generally available) OpenShift version
 # Usage: get_latest_ga_version
 # Returns: Version string (e.g., "4.21") or empty string on failure
 # Exit: 0 on success, 1 on failure
+#
+# Only OCP releases are considered. Sippy's ga_dates lists every product it
+# tracks (OCP Logging, and any other product carrying a GA date), so the
+# selection is made from .release_attrs — see _JQ_OCP_GA_VERSIONS. When the
+# payload holds no GA'd OCP release the function fails loudly, exactly as it
+# does for an unparseable response, rather than returning another product's
+# version.
 #
 # The fetch and the parse are separate stages with separate diagnostics. A
 # successful HTTP response whose payload cannot be parsed is reported as a
@@ -494,8 +556,10 @@ get_latest_ga_version() {
     fi
 
     # Stage 2b: extract. Keep jq's exit code; `if` keeps `set -e` from aborting.
+    # Only OCP releases are considered: ga_dates is published for every product
+    # Sippy tracks. See _JQ_OCP_GA_VERSIONS.
     if version=$(printf '%s' "$body" | \
-        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null); then
+        jq -r "${_JQ_OCP_GA_VERSIONS} | last" 2>/dev/null); then
         jq_status=0
     else
         jq_status=$?

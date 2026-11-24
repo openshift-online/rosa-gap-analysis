@@ -84,16 +84,41 @@ def log_stream_lookup_failure(stream, version_line, streams):
     log_info(f"Stream {stream} holds {len(versions)} accepted version(s); newest: {sample}")
 
 
-def fetch_sippy_ga_dates():
-    """Fetch GA dates from Sippy API."""
+def fetch_sippy_releases():
+    """
+    Fetch the whole Sippy releases payload.
+
+    An unexpected payload exits 1 rather than degrading to an empty mapping:
+    every caller reads GA status from this response, and an empty mapping
+    silently answers "nothing is GA", which turns Check #6 into a candidate-only
+    comparison and sends Checks #9-#13 looking for the wrong Prow jobs. Mirrors
+    the shell resolver, which classifies the same payload as
+    "response root is JSON <type>, expected object".
+
+    Returns:
+        dict: the decoded response object.
+    """
     try:
         req = Request(SIPPY_API, headers={'User-Agent': 'gap-analysis-script'})
         with urlopen(req, timeout=10) as response:
-            data = response.read()
-            return json.loads(data).get('ga_dates', {})
+            payload = json.loads(response.read())
     except (URLError, json.JSONDecodeError) as e:
         log_error(f"Failed to fetch GA dates from Sippy API: {e}")
         sys.exit(1)
+
+    if not isinstance(payload, dict):
+        log_error(f"Sippy API response root is JSON {type(payload).__name__}, expected object")
+        sys.exit(1)
+    return payload
+
+
+def fetch_sippy_ga_dates():
+    """Fetch GA dates from Sippy API."""
+    ga_dates = fetch_sippy_releases().get('ga_dates', {})
+    if not isinstance(ga_dates, dict):
+        log_error(f"Sippy API ga_dates is JSON {type(ga_dates).__name__}, expected object")
+        sys.exit(1)
+    return ga_dates
 
 
 def is_ga_minor_version(minor_version, ga_dates=None):
@@ -103,15 +128,77 @@ def is_ga_minor_version(minor_version, ga_dates=None):
     return minor_version in ga_dates
 
 
+def _is_numeric_version(key):
+    """True for a dot-separated, ASCII-digits-only version key such as "4.21".
+
+    isdigit() alone also accepts characters int() rejects (superscripts, for
+    one), so the ASCII test is what makes the int() below total.
+    """
+    return isinstance(key, str) and all(
+        part.isascii() and part.isdigit() for part in key.split('.')
+    )
+
+
+def _ocp_ga_versions(payload):
+    """
+    Return the GA'd OCP versions in a Sippy releases payload, oldest first.
+
+    Sippy serves every product it tracks from one endpoint and fills the
+    deprecated ga_dates for each release that has a GA date, so the map is not
+    OpenShift-only: the live payload carries "logging-6.6" (product
+    "OCP Logging") next to the OCP minors. Sorting the raw key set as
+    OpenShift versions therefore hands "logging-6" to int() and raises for an
+    entry this repository never wanted.
+
+    release_attrs names the product of each release, so selection is by
+    product rather than by guessing from the key. The numeric-shape test is
+    kept as the parse guard it always was — a key only reaches int() once it
+    is known to be dot-separated digits — and is applied first, so a
+    non-version key never reaches the attribute lookup either.
+
+    A release missing from release_attrs, or carrying no product, is treated
+    as OCP: an older Sippy without the field then behaves exactly as before,
+    with the numeric guard alone deciding. Only an absent product is defaulted;
+    a product that is present and not "OCP" is dropped whatever its type.
+
+    Anything that is not a mapping is ignored rather than iterated: a string
+    ga_dates would otherwise iterate its characters and offer "9" as a version.
+
+    (mirrors _JQ_OCP_GA_VERSIONS in openshift-releases.sh — keep the two in step)
+    """
+    ga_dates = payload.get('ga_dates')
+    if not isinstance(ga_dates, dict):
+        ga_dates = {}
+    attrs = payload.get('release_attrs')
+    if not isinstance(attrs, dict):
+        attrs = {}
+
+    versions = []
+    for key in ga_dates:
+        if not _is_numeric_version(key):
+            continue
+        attr = attrs.get(key)
+        product = attr.get('product') if isinstance(attr, dict) else None
+        if product is not None and product != 'OCP':
+            continue
+        versions.append(key)
+
+    return sorted(versions, key=lambda v: list(map(int, v.split('.'))))
+
+
 def get_latest_ga_version():
-    """Get the latest GA version from Sippy API."""
-    ga_dates = fetch_sippy_ga_dates()
-    if not ga_dates:
-        log_error("No GA versions found in Sippy API")
+    """
+    Get the latest GA OpenShift version from the Sippy API.
+
+    Only OCP releases are considered; see _ocp_ga_versions(). When the payload
+    holds no GA'd OCP release the call fails loudly rather than returning
+    another product's version.
+    """
+    versions = _ocp_ga_versions(fetch_sippy_releases())
+    if not versions:
+        log_error("No GA OCP versions found in Sippy API")
         sys.exit(1)
 
-    # Sort versions and get the latest
-    versions = sorted(ga_dates.keys(), key=lambda v: list(map(int, v.split('.'))))
     return versions[-1]
 
 

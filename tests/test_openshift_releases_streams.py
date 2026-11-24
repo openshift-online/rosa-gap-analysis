@@ -8,6 +8,8 @@ for 5.0.x in the hardcoded "4-stable" stream, so it reported
 All tests run offline against fixtures; no API is contacted.
 """
 
+import json
+
 import pytest
 
 import openshift_releases
@@ -16,6 +18,11 @@ from tests.fixtures.accepted_streams import (
     ACCEPTED_STREAMS,
     ACCEPTED_STREAMS_AT_GA,
     ACCEPTED_STREAMS_EMPTY_5,
+)
+from tests.fixtures.sippy_releases import (
+    MIXED_PRODUCT_LATEST_GA,
+    MIXED_PRODUCT_RELEASES,
+    NO_OCP_GA_RELEASES,
 )
 
 
@@ -51,6 +58,129 @@ def test_stable_stream_follows_major(version, expected):
 ])
 def test_dev_preview_stream_follows_major(version, expected):
     assert openshift_releases.dev_preview_stream_for_version(version) == expected
+
+
+# --- get_latest_ga_version: OCP-only selection ------------------------------
+#
+# Sippy's ga_dates is published for every product it tracks, so the resolver
+# has to pick the OCP releases out of it. Guards the failure seen in
+# periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-nightly-4-19:
+# logging-6.6 entered ga_dates and the whole key set was sorted as OpenShift
+# versions, so resolution aborted on a release this repository never wanted.
+
+def _use_releases(monkeypatch, payload):
+    monkeypatch.setattr(openshift_releases, "fetch_sippy_releases", lambda: payload)
+
+
+def test_latest_ga_ignores_other_products(monkeypatch):
+    """The live mix: OCP 4.19/5.0, OCP Logging logging-6.6, OKD 5.0-okd."""
+    _use_releases(monkeypatch, MIXED_PRODUCT_RELEASES)
+    assert openshift_releases.get_latest_ga_version() == MIXED_PRODUCT_LATEST_GA
+
+
+def test_latest_ga_selects_by_product_not_key_shape(monkeypatch):
+    """A non-OCP release with a version-shaped key must still be excluded,
+    which only the product metadata can decide."""
+    _use_releases(monkeypatch, {
+        "ga_dates": {"4.19": "2025-06-17", "9.9": "2026-01-01"},
+        "release_attrs": {
+            "4.19": {"product": "OCP"},
+            "9.9": {"product": "OKD"},
+        },
+    })
+    assert openshift_releases.get_latest_ga_version() == "4.19"
+
+
+def test_latest_ga_orders_minors_numerically_not_lexically(monkeypatch):
+    """4.9 sorts after 4.20 lexically; the numeric sort must still win."""
+    _use_releases(monkeypatch, {"ga_dates": {"4.9": "d", "4.20": "d", "4.10": "d"}})
+    assert openshift_releases.get_latest_ga_version() == "4.20"
+
+
+def test_latest_ga_treats_a_payload_without_release_attrs_as_ocp(monkeypatch):
+    """An older Sippy has no release_attrs; the numeric guard alone decides,
+    exactly as before this filter existed."""
+    _use_releases(monkeypatch, {"ga_dates": {"4.19": "d", "5.0": "d"}})
+    assert openshift_releases.get_latest_ga_version() == "5.0"
+
+
+def test_latest_ga_fails_when_no_ocp_release_has_ga(monkeypatch, capsys):
+    """Fail loudly instead of handing back another product's version."""
+    _use_releases(monkeypatch, NO_OCP_GA_RELEASES)
+    with pytest.raises(SystemExit) as exc:
+        openshift_releases.get_latest_ga_version()
+    assert exc.value.code == 1
+    assert "No GA OCP versions found" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("payload,expected", [
+    # Nothing to select from.
+    ({}, []),
+    ({"ga_dates": {}}, []),
+    ({"ga_dates": {"logging-6.6": "d"}}, []),
+    # release_attrs of the wrong type falls back to the numeric guard...
+    ({"ga_dates": {"4.19": "d"}, "release_attrs": "not-a-mapping"}, ["4.19"]),
+    # ...and so does a single entry that is not an object.
+    ({"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": "not-a-mapping"}}, ["4.19"]),
+    # Only an ABSENT product is defaulted to OCP; a present one is obeyed
+    # whatever its JSON type, so `false` is not read as "unset".
+    ({"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": {}}}, ["4.19"]),
+    ({"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": {"product": None}}}, ["4.19"]),
+    ({"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": {"product": False}}}, []),
+    # Degenerate keys are skipped, never fed to int().
+    ({"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}}, ["4.19"]),
+    # A non-mapping ga_dates is ignored, not iterated: iterating the string
+    # would offer its characters as versions and resolve "9".
+    ({"ga_dates": "4.19"}, []),
+    ({"ga_dates": ["4.19", "5.0"]}, []),
+    ({"ga_dates": 5}, []),
+])
+def test_ocp_ga_versions_handles_an_unexpected_payload(payload, expected):
+    """Selection must neither raise nor invent a version, whatever the payload:
+    every key that reaches int() has been proved to be dotted digits first."""
+    assert openshift_releases._ocp_ga_versions(payload) == expected
+
+
+# --- fetch_sippy_releases / fetch_sippy_ga_dates ----------------------------
+
+def _stub_sippy_response(monkeypatch, body):
+    """Stub urlopen with a context manager returning `body` as raw bytes."""
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self):
+            return body.encode()
+
+    monkeypatch.setattr(openshift_releases, "urlopen", lambda *a, **kw: _Response())
+
+
+def test_fetch_sippy_releases_returns_the_whole_payload(monkeypatch):
+    _stub_sippy_response(monkeypatch, json.dumps(MIXED_PRODUCT_RELEASES))
+    assert openshift_releases.fetch_sippy_releases() == MIXED_PRODUCT_RELEASES
+    assert openshift_releases.fetch_sippy_ga_dates() == MIXED_PRODUCT_RELEASES["ga_dates"]
+
+
+@pytest.mark.parametrize("body,message", [
+    ('["4.21"]', "response root is JSON list, expected object"),
+    ('"4.21"', "response root is JSON str, expected object"),
+    ('{"ga_dates": ["4.21"]}', "ga_dates is JSON list, expected object"),
+    ('{"ga_dates": "4.21"}', "ga_dates is JSON str, expected object"),
+])
+def test_fetch_sippy_ga_dates_fails_loudly_on_an_unexpected_payload(
+    monkeypatch, capsys, body, message
+):
+    """Degrading to an empty mapping would answer "nothing is GA" in silence,
+    which flips Check #6 to candidate-only and makes Checks #9-#13 look for the
+    wrong Prow jobs. Mirrors the shell resolver's own classification."""
+    _stub_sippy_response(monkeypatch, body)
+    with pytest.raises(SystemExit) as exc:
+        openshift_releases.fetch_sippy_ga_dates()
+    assert exc.value.code == 1
+    assert message in capsys.readouterr().err
 
 
 # --- get_previous_z_stream_version -----------------------------------------

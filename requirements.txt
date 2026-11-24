@@ -2,7 +2,7 @@
 # Install with: pip install -r requirements.txt
 
 # YAML parsing for CredentialsRequest manifests
-PyYAML==6.0.3
+PyYAML==6.0.4
 
 # Template engine for report generation
 Jinja2==3.1.6

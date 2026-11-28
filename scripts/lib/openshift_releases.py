@@ -16,6 +16,18 @@ RELEASE_STREAM_BASE = "https://amd64.ocp.releases.ci.openshift.org/api/v1/releas
 # Number of versions included in a resolution-failure diagnostic
 _DIAGNOSTIC_SAMPLE_SIZE = 10
 
+# Bounds on the ignored-key sample. Those names come straight from the API, so
+# each one is truncated to _DIAGNOSTIC_KEY_MAX_LEN characters and the joined
+# list is capped at _DIAGNOSTIC_SAMPLE_CHARS, which together keep the line
+# inside the same 200-character budget every other diagnostic here observes
+# even when _DIAGNOSTIC_SAMPLE_SIZE names are available.
+# (mirrors _DIAGNOSTIC_KEY_MAX_LEN / _DIAGNOSTIC_SAMPLE_CHARS in openshift-releases.sh)
+_DIAGNOSTIC_KEY_MAX_LEN = 20
+_DIAGNOSTIC_SAMPLE_CHARS = 100
+
+# Punctuation a sanitized key name may keep, beyond ASCII letters and digits.
+_SAFE_KEY_PUNCTUATION = '.-_'
+
 
 def stable_stream_for_version(version):
     """
@@ -84,16 +96,41 @@ def log_stream_lookup_failure(stream, version_line, streams):
     log_info(f"Stream {stream} holds {len(versions)} accepted version(s); newest: {sample}")
 
 
-def fetch_sippy_ga_dates():
-    """Fetch GA dates from Sippy API."""
+def fetch_sippy_releases():
+    """
+    Fetch the whole Sippy releases payload.
+
+    An unexpected payload exits 1 rather than degrading to an empty mapping:
+    every caller reads GA status from this response, and an empty mapping
+    silently answers "nothing is GA", which turns Check #6 into a candidate-only
+    comparison and sends Checks #9-#13 looking for the wrong Prow jobs. Mirrors
+    the shell resolver, which classifies the same payload as
+    "response root is JSON <type>, expected object".
+
+    Returns:
+        dict: the decoded response object.
+    """
     try:
         req = Request(SIPPY_API, headers={'User-Agent': 'gap-analysis-script'})
         with urlopen(req, timeout=10) as response:
-            data = response.read()
-            return json.loads(data).get('ga_dates', {})
+            payload = json.loads(response.read())
     except (URLError, json.JSONDecodeError) as e:
         log_error(f"Failed to fetch GA dates from Sippy API: {e}")
         sys.exit(1)
+
+    if not isinstance(payload, dict):
+        log_error(f"Sippy API response root is JSON {type(payload).__name__}, expected object")
+        sys.exit(1)
+    return payload
+
+
+def fetch_sippy_ga_dates():
+    """Fetch GA dates from Sippy API."""
+    ga_dates = fetch_sippy_releases().get('ga_dates', {})
+    if not isinstance(ga_dates, dict):
+        log_error(f"Sippy API ga_dates is JSON {type(ga_dates).__name__}, expected object")
+        sys.exit(1)
+    return ga_dates
 
 
 def is_ga_minor_version(minor_version, ga_dates=None):
@@ -103,15 +140,167 @@ def is_ga_minor_version(minor_version, ga_dates=None):
     return minor_version in ga_dates
 
 
+def _is_numeric_version(key):
+    """True for a dot-separated, ASCII-digits-only version key such as "4.21".
+
+    isdigit() alone also accepts characters int() rejects (superscripts, for
+    one), so the ASCII test is what makes the int() below total.
+    """
+    return isinstance(key, str) and all(
+        part.isascii() and part.isdigit() for part in key.split('.')
+    )
+
+
+def _partition_ga_dates(payload):
+    """
+    Split a Sippy payload's ga_dates keys into (ocp_versions, ignored_keys).
+
+    One pass decides both sides, so the diagnostic that names the ignored keys
+    can never disagree with the selection it is explaining.
+
+    Sippy serves every product it tracks from one endpoint and fills the
+    deprecated ga_dates for each release that has a GA date, so the map is not
+    OpenShift-only: the live payload carries "logging-6.6" (product
+    "OCP Logging") next to the OCP minors. Sorting the raw key set as
+    OpenShift versions therefore hands "logging-6" to int() and raises for an
+    entry this repository never wanted.
+
+    release_attrs names the product of each release, so selection is by
+    product rather than by guessing from the key. The numeric-shape test is
+    kept as the parse guard it always was — a key only reaches int() once it
+    is known to be dot-separated digits — and is applied first, so a
+    non-version key never reaches the attribute lookup either.
+
+    A release missing from release_attrs, or carrying no product, is treated
+    as OCP: an older Sippy without the field then behaves exactly as before,
+    with the numeric guard alone deciding. Only an absent product is defaulted;
+    a product that is present and not "OCP" is dropped whatever its type.
+
+    Anything that is not a mapping is ignored rather than iterated: a string
+    ga_dates would otherwise iterate its characters and offer "9" as a version.
+
+    (mirrors _JQ_OCP_GA_VERSIONS / _JQ_IGNORED_GA_KEYS in openshift-releases.sh
+    — keep them in step)
+    """
+    if not isinstance(payload, dict):
+        return [], []
+    ga_dates = payload.get('ga_dates')
+    if not isinstance(ga_dates, dict):
+        ga_dates = {}
+    attrs = payload.get('release_attrs')
+    if not isinstance(attrs, dict):
+        attrs = {}
+
+    versions = []
+    ignored = []
+    for key in ga_dates:
+        if not _is_numeric_version(key):
+            ignored.append(key)
+            continue
+        attr = attrs.get(key)
+        product = attr.get('product') if isinstance(attr, dict) else None
+        if product is not None and product != 'OCP':
+            ignored.append(key)
+            continue
+        versions.append(key)
+
+    return versions, ignored
+
+
+def _ocp_ga_versions(payload):
+    """Return the GA'd OCP versions in a Sippy releases payload, oldest first."""
+    versions, _ignored = _partition_ga_dates(payload)
+    return sorted(versions, key=lambda v: list(map(int, v.split('.'))))
+
+
+def _safe_key_name(key):
+    """
+    Map an untrusted ga_dates key onto a bounded, printable name.
+
+    Truncation comes first, so a long key cannot smuggle a long payload past
+    the charset filter, which then keeps only ASCII letters, digits and
+    _SAFE_KEY_PUNCTUATION — dropping the newline that would forge a second log
+    line. A name left empty collapses to "?" so the count of names still
+    matches the keys they stand for.
+
+    (mirrors _safe_key_name() in openshift-releases.sh)
+    """
+    kept = ''.join(
+        char for char in str(key)[:_DIAGNOSTIC_KEY_MAX_LEN]
+        if char.isascii() and (char.isalnum() or char in _SAFE_KEY_PUNCTUATION)
+    )
+    return kept or '?'
+
+
+def _bounded_key_sample(keys):
+    """
+    Render at most _DIAGNOSTIC_SAMPLE_SIZE key names within the character cap.
+
+    The character cap never splits a name: the join stops at the first name
+    that would not fit rather than ending the line mid-key. (A name longer
+    than _DIAGNOSTIC_KEY_MAX_LEN is still truncated by _safe_key_name before
+    it gets here.) Returns (sample, names_shown).
+    """
+    sample = ''
+    shown = 0
+    for key in keys[:_DIAGNOSTIC_SAMPLE_SIZE]:
+        name = _safe_key_name(key)
+        candidate = f"{sample}, {name}" if sample else name
+        if len(candidate) > _DIAGNOSTIC_SAMPLE_CHARS:
+            break
+        sample = candidate
+        shown += 1
+    return sample, shown
+
+
+def log_ignored_ga_keys(payload):
+    """
+    Record which ga_dates keys the OCP filter ignored, as one bounded line.
+
+    The filter drops keys silently, so on its own a CI artifact cannot tell
+    "Sippy published no new OCP GA" from "the filter dropped the release we
+    wanted". Naming the ignored keys answers that, and it answers it on the
+    success path too — the nightly that prompted this logged a GA version
+    without ever mentioning logging-6.6, the key the job actually tripped over.
+
+    Only key names are logged, never a value, never the payload: the GA dates
+    beside those keys are response content and stay out of the artifact, as
+    does the full key set (at most _DIAGNOSTIC_SAMPLE_SIZE names appear).
+    Nothing is logged when no key was ignored, which is the ordinary case.
+
+    (mirrors _log_ignored_ga_keys() in openshift-releases.sh)
+    """
+    versions, ignored = _partition_ga_dates(payload)
+    if not ignored:
+        return
+
+    # Sorted by name so the line is reproducible across runs and agrees with
+    # the shell resolver, whose jq `keys` is sorted. Keys are stringified
+    # first: JSON object keys are always strings, but hand-built payloads
+    # reach this through the tests too.
+    total = len(versions) + len(ignored)
+    sample, shown = _bounded_key_sample(sorted(str(key) for key in ignored))
+    log_info(f"Ignored {len(ignored)} of {total} ga_dates key(s) as non-OCP; "
+             f"{shown} name(s) shown: {sample or 'none'}")
+
+
 def get_latest_ga_version():
-    """Get the latest GA version from Sippy API."""
-    ga_dates = fetch_sippy_ga_dates()
-    if not ga_dates:
-        log_error("No GA versions found in Sippy API")
+    """
+    Get the latest GA OpenShift version from the Sippy API.
+
+    Only OCP releases are considered; see _partition_ga_dates(). When the
+    payload holds no GA'd OCP release the call fails loudly rather than
+    returning another product's version. Either way the ignored keys are named
+    first, so the artifact explains the input shape even on success.
+    """
+    payload = fetch_sippy_releases()
+    log_ignored_ga_keys(payload)
+
+    versions = _ocp_ga_versions(payload)
+    if not versions:
+        log_error("No GA OCP versions found in Sippy API")
         sys.exit(1)
 
-    # Sort versions and get the latest
-    versions = sorted(ga_dates.keys(), key=lambda v: list(map(int, v.split('.'))))
     return versions[-1]
 
 

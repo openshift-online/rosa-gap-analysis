@@ -21,10 +21,113 @@ _ACCEPTED_STREAMS_CACHE=""
 # (mirrors _DIAGNOSTIC_SAMPLE_SIZE in openshift_releases.py)
 readonly _DIAGNOSTIC_SAMPLE_SIZE=10
 
+# Bounds on the ignored-key sample. Those names come straight from the API, so
+# each one is truncated to _DIAGNOSTIC_KEY_MAX_LEN characters and the joined
+# list is capped at _DIAGNOSTIC_SAMPLE_CHARS, which together keep the line
+# inside the same 200-character budget every other diagnostic here observes
+# even when _DIAGNOSTIC_SAMPLE_SIZE names are available.
+# (mirrors _DIAGNOSTIC_KEY_MAX_LEN / _DIAGNOSTIC_SAMPLE_CHARS in openshift_releases.py)
+readonly _DIAGNOSTIC_KEY_MAX_LEN=20
+readonly _DIAGNOSTIC_SAMPLE_CHARS=100
+
 # jq predicate dropping RC/EC pre-releases. X-stable carries that major's RC
 # builds alongside its stable releases, so every "stable"/z-stream filter needs
 # it (mirrors is_prerelease_version() in openshift_releases.py).
 readonly _JQ_NOT_PRERELEASE='((contains("-rc.") or contains("-ec.")) | not)'
+
+# The numeric-key test, shared by every jq program below that reads .ga_dates.
+# It is the guard that stands between an arbitrary key and tonumber, so the two
+# programs must apply exactly the same one; defining it once is what guarantees
+# that. Digits are checked with explode rather than test() so the program needs
+# no regex-enabled jq build. The split result must be non-empty: "" | split(".")
+# is [], and `all` over [] is vacuously true, which would let an empty key
+# through.
+# (mirrors _is_numeric_version() in openshift_releases.py)
+readonly _JQ_VERSION_DEFS='
+def _digits_only: length > 0 and (explode | all(. >= 48 and . <= 57));
+def _numeric_version:
+    type == "string" and (split(".") | length > 0 and all(_digits_only));
+'
+
+# jq program yielding the OCP releases of .ga_dates as an array, oldest first.
+#
+# Sippy serves every product it tracks from one endpoint and fills the
+# deprecated .ga_dates for each release that has a GA date, so the map is not
+# OpenShift-only: the live payload carries "logging-6.6" (product
+# "OCP Logging") next to the OCP minors, and OKD streams sit in .releases the
+# same way. Sorting the raw key set as OpenShift versions therefore hands
+# "logging-6" to tonumber and aborts resolution for an entry this repository
+# never wanted.
+#
+# .release_attrs names the product of each release, so selection is by product
+# rather than by guessing from the key. The numeric-shape test is kept as the
+# parse guard it always was — a key only reaches tonumber once it is known to
+# be dot-separated digits — and is applied first, so a non-version key never
+# reaches the attribute lookup either.
+#
+# A release missing from .release_attrs, or carrying no product, is treated as
+# OCP: an older Sippy without the field then behaves exactly as before, with
+# the numeric guard alone deciding. Only an absent product is defaulted — a
+# product that is present and not "OCP" is dropped whatever its JSON type, so
+# `false` is not quietly read as "unset" the way `//` would read it.
+#
+# The numeric-shape test comes from _JQ_VERSION_DEFS, so this program and the
+# ignored-key report below can never disagree about what a version key is.
+#
+# (mirrors _ocp_ga_versions() in openshift_releases.py — keep the two in step)
+readonly _JQ_OCP_GA_VERSIONS="${_JQ_VERSION_DEFS}"'
+((.release_attrs | objects) // {}) as $attrs
+| (.ga_dates | objects | keys)
+| map(select(_numeric_version))
+| map(select(
+      (($attrs[.] | objects) // {} | .product) as $product
+      | $product == null or $product == "OCP"))
+| sort_by(split(".") | map(tonumber))
+'
+
+# jq program reporting what _JQ_OCP_GA_VERSIONS left behind, as two lines plus
+# one line per sampled name: the total .ga_dates key count, the ignored key
+# count, then at most $n ignored key names, each already truncated to $m
+# characters and reduced to [A-Za-z0-9._-]. Nothing ignored means exactly two
+# lines.
+#
+# The selection rule is written once more here rather than being derived from
+# _JQ_OCP_GA_VERSIONS by subtraction, because subtraction over `keys` would
+# report a key the selector dropped for being unreadable and a key it kept
+# identically, and the two programs sit in the same file so they are reviewed
+# together. The predicate below is the exact negation of the one above: a key
+# is ignored when it is not a numeric version, or when release_attrs names a
+# product other than OCP for it. The numeric-shape test itself is shared
+# through _JQ_VERSION_DEFS, so the one part that must never drift cannot.
+#
+# Everything is read through `objects`, so a payload with no .ga_dates, a
+# .ga_dates of the wrong type, or a non-object root yields "0 0" and no names
+# rather than an error.
+#
+# Names are sanitized inside jq, before the shell ever sees them: truncation
+# first, so a long key cannot smuggle a long payload past the charset filter,
+# then the charset filter, which drops the newline that would forge a second
+# log line and the backslash that `echo -e` in log_info would interpret. A key
+# whose every character is dropped is reported as "?" so the count of names
+# still matches the keys they stand for.
+#
+# (mirrors _partition_ga_dates()/_safe_key_name() in openshift_releases.py)
+readonly _JQ_IGNORED_GA_KEYS="${_JQ_VERSION_DEFS}"'
+def _safe_name:
+    .[0:$m] | explode
+    | map(select((. >= 48 and . <= 57) or (. >= 65 and . <= 90)
+                 or (. >= 97 and . <= 122) or . == 45 or . == 46 or . == 95))
+    | implode
+    | if length == 0 then "?" else . end;
+((. | objects) // {}) as $root
+| (($root.release_attrs | objects) // {}) as $attrs
+| (($root.ga_dates | objects) // {} | keys) as $keys
+| ($keys | map(select(
+      (_numeric_version | not)
+      or ((($attrs[.] | objects) // {} | .product) as $product
+          | $product != null and $product != "OCP")))) as $ignored
+| ($keys | length), ($ignored | length), ($ignored | .[0:$n] | map(_safe_name)[])
+'
 
 # The accepted-streams API publishes one stable and one dev-preview stream per
 # MAJOR version (4-stable, 5-stable, 4-dev-preview, 5-dev-preview). Always derive
@@ -302,6 +405,25 @@ _safe_count() {
     fi
 }
 
+# Map an untrusted ga_dates key onto a bounded, printable name: truncated to
+# _DIAGNOSTIC_KEY_MAX_LEN characters, then reduced to ASCII letters, digits,
+# dot, dash and underscore. _JQ_IGNORED_GA_KEYS already applies the same two
+# steps in the same order; this repeats them on the shell side so the guarantee
+# does not depend on which jq produced the line, and so the function stays safe
+# for any other caller. Truncating first is what stops a long key from
+# smuggling a long payload past the charset filter. A name left empty collapses
+# to "?" rather than vanishing from the sample.
+#
+# printf, not echo: the builtin echo swallows an argument of "-e", "-n" or
+# "-E", so a key named after one of those would be dropped from a line that
+# still counted it.
+# Usage: _safe_key_name "logging-6.6"
+_safe_key_name() {
+    local value="${1:0:_DIAGNOSTIC_KEY_MAX_LEN}"
+    value="${value//[^A-Za-z0-9._-]/}"
+    printf '%s\n' "${value:-?}"
+}
+
 # True when the body carries a number JSON cannot express.
 #
 # jq's parser is a superset of JSON: it accepts the bare literals `Infinity`,
@@ -359,6 +481,7 @@ _classify_ga_dates_failure() {
     local has_ga_dates
     local ga_dates_type
     local key_count
+    local ocp_count
 
     # Sanitize here too: the function is export -f'd, so it must not rely on a
     # caller having validated these before interpolating them into a log line.
@@ -435,13 +558,105 @@ _classify_ga_dates_failure() {
         return 0
     fi
 
-    echo "ga_dates holds ${key_count} key(s), at least one of which is not a numeric version"
+    # ga_dates covers every Sippy product, so a populated map is not in itself
+    # an OCP map. Name the OCP subset: "20 keys, 0 of them OCP" points triage at
+    # the product filter, where "at least one key is not a version" pointed at
+    # the key format and, once logging-6.6 shipped, was simply wrong.
+    ocp_count=$(_safe_count "$(printf '%s' "$body" | \
+        jq -r "${_JQ_OCP_GA_VERSIONS} | length" 2>/dev/null)")
+    if [[ "$ocp_count" == "0" ]]; then
+        echo "ga_dates holds ${key_count} key(s), none of them a GA'd OCP version (${bytes} byte(s))"
+        return 0
+    fi
+
+    # Defensive: with a non-empty OCP subset the extract always yields a
+    # version, so reaching here means the two jq runs disagreed.
+    echo "ga_dates holds ${key_count} key(s), ${ocp_count} OCP, no version read (${bytes} byte(s))"
+}
+
+# Record which .ga_dates keys the OCP filter ignored, as one bounded line.
+#
+# The filter drops keys silently, so on its own a CI artifact cannot tell
+# "Sippy published no new OCP GA" from "the filter dropped the release we
+# wanted". Naming the ignored keys answers that, and it answers it on the
+# success path too — the nightly that prompted this logged a GA version
+# without ever mentioning logging-6.6, the key the job actually tripped over.
+#
+# Only key names are logged, never a value, never the body: the GA dates that
+# sit beside those keys are response content and stay out of the artifact, as
+# does the full key set (at most _DIAGNOSTIC_SAMPLE_SIZE names appear). Nothing
+# is logged when no key was ignored, which is the ordinary case.
+#
+# The caller must establish that the body is one complete JSON document first;
+# this function reads values out of it and makes no attempt to classify a
+# payload that did not parse.
+# Usage: _log_ignored_ga_keys <body>
+_log_ignored_ga_keys() {
+    local body="$1"
+    local report
+    local line
+    local candidate
+    local index=0
+    local total="unknown"
+    local ignored="unknown"
+    local shown=0
+    local sample=""
+
+    # No diagnostic at all is better than a misleading one, so a jq that could
+    # not produce the report is simply silent here; the caller's own
+    # classification owns the "payload is unusable" message.
+    if ! report=$(printf '%s' "$body" | \
+        jq -r --argjson n "$_DIAGNOSTIC_SAMPLE_SIZE" --argjson m "$_DIAGNOSTIC_KEY_MAX_LEN" \
+        "${_JQ_IGNORED_GA_KEYS}" 2>/dev/null); then
+        return 0
+    fi
+
+    while IFS= read -r line; do
+        index=$((index + 1))
+        case "$index" in
+            1) total=$(_safe_count "$line") ;;
+            2) ignored=$(_safe_count "$line") ;;
+            *)
+                line=$(_safe_key_name "$line")
+                if [[ -z "$sample" ]]; then
+                    candidate="$line"
+                else
+                    candidate="${sample}, ${line}"
+                fi
+                # The character cap never splits a name: stop at the first one
+                # that would not fit rather than ending the line mid-key. (A
+                # name longer than _DIAGNOSTIC_KEY_MAX_LEN is still truncated
+                # by _safe_key_name before it gets here.)
+                if (( ${#candidate} > _DIAGNOSTIC_SAMPLE_CHARS )); then
+                    break
+                fi
+                sample="$candidate"
+                shown=$((shown + 1))
+                ;;
+        esac
+    done <<< "$report"
+
+    if [[ "$ignored" == "unknown" ]] || [[ "$ignored" == "0" ]]; then
+        return 0
+    fi
+
+    # Worded so it cannot be mistaken for _classify_ga_dates_failure's own
+    # "ga_dates holds N key(s), ..." line, which may follow it on the failure
+    # path and counts something else.
+    _log_diagnostic "Ignored ${ignored} of ${total} ga_dates key(s) as non-OCP; ${shown} name(s) shown: ${sample:-none}"
 }
 
 # Get the latest GA (generally available) OpenShift version
 # Usage: get_latest_ga_version
 # Returns: Version string (e.g., "4.21") or empty string on failure
 # Exit: 0 on success, 1 on failure
+#
+# Only OCP releases are considered. Sippy's ga_dates lists every product it
+# tracks (OCP Logging, and any other product carrying a GA date), so the
+# selection is made from .release_attrs — see _JQ_OCP_GA_VERSIONS. When the
+# payload holds no GA'd OCP release the function fails loudly, exactly as it
+# does for an unparseable response, rather than returning another product's
+# version.
 #
 # The fetch and the parse are separate stages with separate diagnostics. A
 # successful HTTP response whose payload cannot be parsed is reported as a
@@ -494,11 +709,20 @@ get_latest_ga_version() {
     fi
 
     # Stage 2b: extract. Keep jq's exit code; `if` keeps `set -e` from aborting.
+    # Only OCP releases are considered: ga_dates is published for every product
+    # Sippy tracks. See _JQ_OCP_GA_VERSIONS.
     if version=$(printf '%s' "$body" | \
-        jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last' 2>/dev/null); then
+        jq -r "${_JQ_OCP_GA_VERSIONS} | last" 2>/dev/null); then
         jq_status=0
     else
         jq_status=$?
+    fi
+
+    # Stage 2c: explain the input shape, whichever way the extract went. Gated
+    # on a complete single-document parse because only then are the keys worth
+    # reading; the failure classification below covers the other payloads.
+    if [[ $root_rc -eq 0 ]] && [[ "$doc_count" == "1" ]] && [[ $non_finite -eq 0 ]]; then
+        _log_ignored_ga_keys "$body"
     fi
 
     # root_rc is redundant in practice (both jq runs parse the same stream, so
@@ -1447,7 +1671,9 @@ export -f _log_diagnostic
 export -f _log_stream_lookup_failure
 export -f _safe_json_type
 export -f _safe_count
+export -f _safe_key_name
 export -f _json_has_non_finite_number
+export -f _log_ignored_ga_keys
 export -f _classify_ga_dates_failure
 export -f _log_ga_version_failure
 export -f stable_stream_for_version

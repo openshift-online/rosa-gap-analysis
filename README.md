@@ -107,9 +107,20 @@ jq '.aws_sts.comparison' reports/gap-analysis-full_*.json
 Quick curl commands to check current OpenShift versions from accepted release streams:
 
 ```bash
-# Get latest GA version from Sippy
+# Get latest GA version from Sippy. ga_dates lists every product Sippy tracks
+# (logging-6.6 and friends), so select the OCP releases via release_attrs --
+# sorting the raw key set feeds a non-version key to tonumber and fails.
+# A release absent from release_attrs is treated as OCP, as the resolvers do;
+# a product that is present is obeyed whatever its type, so `// "OCP"` must not
+# be applied to the product value -- that would read `false` as "absent" too.
+# The key test ends at \z, not $: jq's regex engine lets $ match before a
+# trailing newline, so "4.19\n" would reach tonumber and abort the command.
 curl -s https://sippy.dptools.openshift.org/api/releases | \
-  jq -r '.ga_dates | keys | sort_by(split(".") | map(tonumber)) | last'
+  jq -r '((.release_attrs | objects) // {}) as $a | .ga_dates | keys
+         | map(select(test("^[0-9]+([.][0-9]+)*\\z")))
+         | map(select((($a[.] | objects) // {} | .product) as $product
+                      | $product == null or $product == "OCP"))
+         | sort_by(split(".") | map(tonumber)) | last'
 
 # Get latest stable for GA line (e.g., 4.21.x)
 curl -s https://amd64.ocp.releases.ci.openshift.org/api/v1/releasestreams/accepted | \

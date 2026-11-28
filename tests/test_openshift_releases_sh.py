@@ -10,6 +10,7 @@ is contacted.
 
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -18,11 +19,18 @@ from pathlib import Path
 
 import pytest
 
+import openshift_releases
+
 from tests.fixtures.accepted_streams import (
     ACCEPTED_STREAMS,
     ACCEPTED_STREAMS_AT_GA,
     ACCEPTED_STREAMS_EMPTY_5,
     as_json,
+)
+from tests.fixtures.sippy_releases import (
+    MIXED_PRODUCT_LATEST_GA,
+    MIXED_PRODUCT_RELEASES,
+    NO_OCP_GA_RELEASES,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -542,12 +550,265 @@ def test_ga_version_reports_empty_ga_dates():
     assert "ga_dates is an empty object" in err
 
 
-def test_ga_version_reports_non_numeric_keys():
+def test_ga_version_reports_no_ocp_release_in_ga_dates():
+    """ga_dates covers every Sippy product, so a populated map need not hold an
+    OCP release. That is a failure, and one the diagnostic must name as such
+    rather than blaming the key format."""
+    body = json.dumps(NO_OCP_GA_RELEASES)
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", "another product's release must not be returned as the OCP GA"
+    assert "ga_dates holds 2 key(s), none of them a GA'd OCP version" in err
+    # The ignored keys are named alongside the classification, so a reader can
+    # see WHICH products crowded out the OCP releases. Their GA dates are
+    # response values and stay out.
+    assert "logging-6.6" in err and "quay-3.18" in err
+    assert not any(value in err for value in NO_OCP_GA_RELEASES["ga_dates"].values())
+
+
+# --- get_latest_ga_version: OCP-only selection ------------------------------
+#
+# Regression for periodic-ci-openshift-online-rosa-gap-analysis-main-periodics-
+# nightly-4-19: Sippy fills the deprecated ga_dates for every product it
+# tracks, so logging-6.6 (product "OCP Logging") joined the OCP minors there.
+# Sorting the whole key set as OpenShift versions fed "logging-6" to tonumber,
+# and the job failed with "at least one of which is not a numeric version"
+# although every OCP release in the payload was perfectly well formed.
+
+def test_ga_version_ignores_other_products():
+    """The live mix: OCP 4.19/5.0, OCP Logging logging-6.6, OKD 5.0-okd."""
+    rc, out, err = run_with_stubbed_curl(json.dumps(MIXED_PRODUCT_RELEASES))
+    assert rc == 0, err
+    assert out == f"GA={MIXED_PRODUCT_LATEST_GA}"
+    assert "Failed to fetch" not in err
+
+
+def test_ga_version_selects_by_product_not_key_shape():
+    """A non-OCP release with a version-shaped key must still be excluded,
+    which only the product metadata can decide."""
+    body = json.dumps({
+        "ga_dates": {"4.19": "2025-06-17", "9.9": "2026-01-01"},
+        "release_attrs": {"4.19": {"product": "OCP"}, "9.9": {"product": "OKD"}},
+    })
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.19"
+
+
+def test_ga_version_tolerates_an_unreadable_key_beside_a_good_one():
+    """An entry the resolver cannot read is skipped, not treated as a veto on
+    the rest of the map — the exact regression the nightly hit."""
     body = json.dumps({"ga_dates": {"four-twenty": "d", "4.21": "d"}})
     rc, out, err = run_with_stubbed_curl(body)
     assert rc == 0, err
+    assert out == "GA=4.21"
+
+
+def test_ga_version_accepts_a_payload_without_release_attrs():
+    """An older Sippy has no release_attrs; the numeric guard alone decides,
+    exactly as it did before the product filter existed."""
+    body = json.dumps({"ga_dates": {"4.19": "d", "5.0": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=5.0"
+
+
+@pytest.mark.parametrize("release_attrs", [
+    "nope",                      # wrong type for the whole map
+    {"4.19": "nope"},            # wrong type for one release
+    {"4.19": {}},                # present, but no product named
+    {"4.19": {"product": None}},
+])
+def test_ga_version_survives_an_unusable_release_attrs(release_attrs):
+    """release_attrs the filter cannot read must not break selection: fall back
+    to the numeric guard rather than failing the whole resolution."""
+    body = json.dumps({"ga_dates": {"4.19": "d"}, "release_attrs": release_attrs})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.19"
+
+
+def test_ga_version_obeys_a_product_that_is_present_but_falsy():
+    """Only an ABSENT product defaults to OCP. `false` is a stated product, not
+    an unset one, and jq's `//` would quietly read it as unset — which is the
+    one place the two resolver copies could drift apart."""
+    body = json.dumps({
+        "ga_dates": {"4.19": "d"},
+        "release_attrs": {"4.19": {"product": False}},
+    })
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
     assert out == "RC=1"
-    assert "ga_dates holds 2 key(s), at least one of which is not a numeric version" in err
+    assert "none of them a GA'd OCP version" in err
+
+
+@pytest.mark.parametrize("extra_keys", [
+    # "" survives `split(".") | all(...)` vacuously, so the empty split result
+    # has to be rejected explicitly.
+    ["", "4.", "4.x"],
+    # Non-ASCII digits: jq's explode/48-57 test rejects these, and the Python
+    # twin needs an isascii() guard to agree. Pinned on both sides.
+    ["４.１９", "4.1²"],
+])
+def test_ga_version_skips_degenerate_keys(extra_keys):
+    """Mirrors the Python suite's unexpected-payload table."""
+    ga_dates = {"4.19": "d"}
+    ga_dates.update({key: "d" for key in extra_keys})
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": ga_dates}))
+    assert rc == 0, err
+    assert out == "GA=4.19"
+
+
+# --- get_latest_ga_version: the ignored-key diagnostic ----------------------
+#
+# The product filter drops keys in silence, so the 5.0 nightly resolved a GA
+# version while never naming logging-6.6 — the key its predecessors died on.
+# One bounded line now records what was dropped, on the success path as much
+# as the failure one, so the artifact explains the shape of the input.
+
+_IGNORED_MARKER = "ga_dates key(s) as non-OCP"
+
+
+def _shell_constant(name):
+    """Read a numeric constant out of the shipped library, so the bounds the
+    tests assert are the bounds the resolver actually uses."""
+    rc, out, err = run_resolver(f'echo "${{{name}}}"', streams={})
+    assert rc == 0, err
+    return int(out)
+
+
+def _ignored_key_line(err):
+    """Return the single ignored-key diagnostic from stderr, or None."""
+    lines = [line for line in err.splitlines() if _IGNORED_MARKER in line]
+    assert len(lines) <= 1, f"expected at most one ignored-key line, got {lines}"
+    return lines[0] if lines else None
+
+
+def _sample_names(line):
+    """The key names a diagnostic line lists, in order."""
+    return line.split("shown: ", 1)[1].split(", ")
+
+
+def test_ga_version_names_ignored_keys_on_the_success_path():
+    """The live mix resolves normally AND says what it skipped."""
+    rc, out, err = run_with_stubbed_curl(json.dumps(MIXED_PRODUCT_RELEASES))
+    assert rc == 0, err
+    assert out == f"GA={MIXED_PRODUCT_LATEST_GA}", "the diagnostic must not alter selection"
+
+    line = _ignored_key_line(err)
+    assert line is not None, "a resolved GA must still explain the input shape"
+    assert "Ignored 1 of 3 ga_dates key(s) as non-OCP; 1 name(s) shown" in line
+    assert _sample_names(line) == ["logging-6.6"]
+    # GA dates are response values; only key names may be logged.
+    assert not any(value in err for value in MIXED_PRODUCT_RELEASES["ga_dates"].values())
+
+
+def test_ga_version_logs_nothing_when_every_key_is_ocp():
+    """The ordinary payload stays quiet: no ignored keys, no line."""
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": {"4.19": "d", "5.0": "d"}}))
+    assert rc == 0, err
+    assert out == "GA=5.0"
+    assert _ignored_key_line(err) is None
+
+
+def test_ga_version_ignored_key_sample_is_capped_at_the_sample_size():
+    """Short names make the count the binding bound, so _DIAGNOSTIC_SAMPLE_SIZE
+    is what the sample is pinned against here rather than the character cap."""
+    ga_dates = {"4.19": "d"}
+    ga_dates.update({f"a{index}": "d" for index in range(40)})
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": ga_dates}))
+    assert rc == 0, err
+    assert out == "GA=4.19", "sampling must not change the chosen OCP GA version"
+
+    line = _ignored_key_line(err)
+    assert "Ignored 40 of 41 ga_dates key(s) as non-OCP" in line, line
+    sample_size = _shell_constant("_DIAGNOSTIC_SAMPLE_SIZE")
+    names = _sample_names(line)
+    assert len(names) == sample_size, f"sample of {len(names)} is not capped at {sample_size}"
+    assert f"{sample_size} name(s) shown" in line
+    assert all(name in ga_dates for name in names)
+
+
+def test_ga_version_ignored_key_sample_is_capped_in_characters():
+    """Longer names hit the character cap first, below the sample size, and the
+    line still fits the budget every diagnostic here observes."""
+    ga_dates = {"4.19": "d"}
+    ga_dates.update({f"logging-6.{index}": "d" for index in range(40)})
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": ga_dates}))
+    assert rc == 0, err
+    assert out == "GA=4.19"
+
+    line = _ignored_key_line(err)
+    assert "Ignored 40 of 41 ga_dates key(s) as non-OCP" in line, line
+    names = _sample_names(line)
+    assert 0 < len(names) < _shell_constant("_DIAGNOSTIC_SAMPLE_SIZE")
+    assert f"{len(names)} name(s) shown" in line
+    assert len(line) < 200, f"diagnostic line is {len(line)} characters"
+    # The character cap never splits a name.
+    assert all(name in ga_dates for name in names)
+
+
+def test_ga_version_ignored_key_names_are_sanitized():
+    """A hostile key cannot forge a log line or smuggle a long payload."""
+    hostile = "logging-6.6\n[ERROR] forged line " + "x" * 300
+    rc, out, err = run_with_stubbed_curl(json.dumps({"ga_dates": {"4.19": "d", hostile: "d"}}))
+    assert rc == 0, err
+    assert out == "GA=4.19"
+
+    line = _ignored_key_line(err)
+    assert "Ignored 1 of 2 ga_dates key(s) as non-OCP; 1 name(s) shown" in line
+    # Pinned exactly: truncation to _DIAGNOSTIC_KEY_MAX_LEN runs BEFORE the
+    # charset filter, so the first 20 characters of the key survive minus the
+    # newline, brackets and space. Filtering first would leave "...ERRORforg".
+    assert _sample_names(line) == ["logging-6.6ERROR"]
+    assert "forged" not in err
+    assert "xxx" not in err
+    assert len(line) < 200
+
+
+def test_ga_version_ignored_key_names_collapse_when_nothing_survives():
+    """A key the charset filter empties still occupies a slot, so the names
+    shown keep matching the keys they stand for."""
+    body = json.dumps({"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}})
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "GA=4.19"
+    assert _sample_names(_ignored_key_line(err)) == ["?", "4.", "4.x"]
+
+
+@pytest.mark.parametrize("label,body", [
+    # A second document's own counts would otherwise be consumed as key names.
+    ("multi-document",
+     json.dumps({"ga_dates": {"logging-6.6": "d", "4.19": "d"}}) + ' {"note":"x"}'),
+    ("trailing-garbage",
+     json.dumps({"ga_dates": {"logging-6.6": "d", "4.19": "d"}}) + " oops"),
+    ("non-finite-number",
+     '{"ga_dates":{"logging-6.6":"d","4.19":"d"},"extra":Infinity}'),
+])
+def test_ga_version_skips_the_diagnostic_on_an_incomplete_parse(label, body):
+    """The diagnostic reads values out of the body, so it runs only once the
+    body is known to be exactly one complete JSON document."""
+    rc, out, err = run_with_stubbed_curl(body)
+    assert rc == 0, err
+    assert out == "RC=1", label
+    assert _ignored_key_line(err) is None, f"{label} produced a diagnostic anyway"
+
+
+@pytest.mark.parametrize("key", [
+    "logging-6.6",
+    "-e",                      # builtin echo would swallow this one
+    "-n",
+    "!" * 25 + "abc",          # nothing survives truncation + filtering
+    "x" * 5 + "!" * 10 + "y" * 30,
+    "",
+])
+def test_safe_key_name_matches_the_python_twin(key):
+    """The helper is export -f'd and its comment claims the mirror, so pin it
+    directly: the end-to-end parity test cannot see it, jq having sanitized
+    the names before the shell helper ever runs."""
+    rc, out, err = run_resolver(f"_safe_key_name {shlex.quote(key)}", streams={})
+    assert rc == 0, err
+    assert out == openshift_releases._safe_key_name(key)
 
 
 def test_ga_version_reports_blank_response_body():
@@ -760,36 +1021,58 @@ def test_ga_version_separates_transport_failure_from_parse_failure():
 
 # One body per classification branch, each carrying the sentinel, so a body
 # excerpt added to any single branch is caught rather than only the first.
+# Each entry pairs the body with the exact number of stderr lines it may
+# produce: 2 for the error marker plus its classification, 3 when the
+# ignored-key diagnostic precedes them. Pinning the count per branch is what
+# catches a branch that silently gains or loses that line.
 _SENTINEL = "SENTINEL-must-never-reach-a-log-9f2c1b"
 _SENTINEL_BODIES = {
-    "not-json": f"<html>{_SENTINEL}</html>",
-    "non-object-root": json.dumps([_SENTINEL]),
-    "absent-ga-dates": json.dumps({"unexpected": _SENTINEL, "note": _SENTINEL}),
-    "wrong-ga-dates-type": json.dumps({"ga_dates": _SENTINEL}),
-    "empty-ga-dates": json.dumps({"ga_dates": {}, "note": _SENTINEL}),
-    "non-numeric-keys": json.dumps({"ga_dates": {_SENTINEL: "d"}}),
-    "trailing-garbage": json.dumps({"ga_dates": {"4.21": "d"}}) + f" {_SENTINEL}",
-    "multi-document": json.dumps({"ga_dates": {"4.20": "d"}})
-    + " "
-    + json.dumps({"note": _SENTINEL}),
-    "non-finite-number": '{"ga_dates":{"4.21":"d"},"note":"'
-    + _SENTINEL
-    + '","extra":Infinity}',
+    "not-json": (f"<html>{_SENTINEL}</html>", 2),
+    "non-object-root": (json.dumps([_SENTINEL]), 2),
+    "absent-ga-dates": (json.dumps({"unexpected": _SENTINEL, "note": _SENTINEL}), 2),
+    "wrong-ga-dates-type": (json.dumps({"ga_dates": _SENTINEL}), 2),
+    "empty-ga-dates": (json.dumps({"ga_dates": {}, "note": _SENTINEL}), 2),
+    # The key is named by the ignored-key diagnostic by design, so the sentinel
+    # sits in the GA date instead: a value must never be logged.
+    "no-ocp-release": (json.dumps({"ga_dates": {"logging-6.6": _SENTINEL}}), 3),
+    # ...and here it sits in a key, past the truncation bound, so the
+    # classification line is still held to naming no part of a key.
+    "no-ocp-release-long-key": (json.dumps({"ga_dates": {"x" * 20 + _SENTINEL: "d"}}), 3),
+    # Version-shaped key, so the product value really is read by the filter.
+    "non-ocp-product": (json.dumps({
+        "ga_dates": {"9.9": "d"},
+        "release_attrs": {"9.9": {"product": _SENTINEL}},
+    }), 3),
+    "trailing-garbage": (json.dumps({"ga_dates": {"4.21": "d"}}) + f" {_SENTINEL}", 2),
+    "multi-document": (json.dumps({"ga_dates": {"4.20": "d"}})
+                       + " "
+                       + json.dumps({"note": _SENTINEL}), 2),
+    "non-finite-number": ('{"ga_dates":{"4.21":"d"},"note":"'
+                          + _SENTINEL
+                          + '","extra":Infinity}', 2),
 }
 
 
 @pytest.mark.parametrize("label", sorted(_SENTINEL_BODIES))
 def test_ga_version_diagnostic_never_echoes_the_response(label):
-    """Every classification branch must stay free of response content."""
-    rc, out, err = run_with_stubbed_curl(_SENTINEL_BODIES[label])
+    """Every classification branch must stay free of response content.
+
+    Ignored ga_dates key NAMES are the one deliberate exception, bounded and
+    charset-restricted by _log_ignored_ga_keys; every sentinel above sits
+    either in a value or past that bound, so any sentinel reaching stderr is
+    still a leak.
+    """
+    body, expected_lines = _SENTINEL_BODIES[label]
+    rc, out, err = run_with_stubbed_curl(body)
     assert rc == 0, err
     assert out == "RC=1"
     assert _SENTINEL not in err, f"{label} branch leaked the response body"
     assert _SENTINEL not in out
     assert "jq:" not in err, f"{label} branch leaked jq stderr"
-    # Two lines only (the error marker plus one classification), both bounded.
+    # The error marker plus one classification, preceded by the ignored-key
+    # line on exactly the branches that have keys to name. All bounded.
     lines = [line for line in err.splitlines() if line.strip()]
-    assert len(lines) == 2
+    assert len(lines) == expected_lines, lines
     assert all(len(line) < 200 for line in lines)
 
 
@@ -844,3 +1127,194 @@ def test_caller_path_still_resolves_when_sippy_is_well_formed():
     assert "REACHED_NEXT_STEP" in out
     assert "BASELINE=5.0.0" in out
     assert "TARGET=5.0.1" in out
+
+
+def test_caller_path_resolves_against_a_multi_product_sippy_payload():
+    """End-to-end for the reported failure: gap-all.sh's own entry point, over
+    a payload whose ga_dates mixes OCP, OCP Logging and OKD releases."""
+    rc, out, err = run_with_stubbed_curl(
+        json.dumps(MIXED_PRODUCT_RELEASES),
+        streams_body=as_json(ACCEPTED_STREAMS),
+        call=GAP_ALL_CONSUMER,
+    )
+    assert rc == 0, err
+    assert "REACHED_NEXT_STEP" in out
+    assert "BASELINE=5.0.0" in out
+    assert "TARGET=5.0.1" in out
+
+
+# --- shell/Python parity for the ignored-key diagnostic ---------------------
+#
+# CLAUDE.md requires the two resolver copies to stay in step. The selection
+# rule already has parity coverage; the diagnostic that explains it needs the
+# same, or an artifact would read differently depending on which resolver the
+# step happened to run.
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _diagnostic_text(stderr):
+    """Strip colour codes and the [INFO] marker from captured diagnostics."""
+    return [
+        _ANSI.sub("", line).replace("[INFO] ", "", 1).strip()
+        for line in stderr.splitlines()
+        if _IGNORED_MARKER in line
+    ]
+
+
+def _shell_ignored_diagnostic(body):
+    script = f'set -euo pipefail\nsource "{RELEASES_LIB}"\n_log_ignored_ga_keys "$(cat)"\n'
+    proc = subprocess.run(
+        ["bash", "-c", script], input=body, capture_output=True, text=True, check=False
+    )
+    assert proc.returncode == 0, proc.stderr
+    return _diagnostic_text(proc.stderr)
+
+
+def _python_ignored_diagnostic(body, capsys):
+    openshift_releases.log_ignored_ga_keys(json.loads(body))
+    return _diagnostic_text(capsys.readouterr().err)
+
+
+_LONG_SYNTHETIC_KEYS = {"4.19": "d"}
+_LONG_SYNTHETIC_KEYS.update({f"logging-6.{index}": "d" for index in range(40)})
+
+# label -> (payload, expected names, or None when no line may be emitted).
+# The expected names pin content as well as agreement, so a label whose two
+# sides are equally broken — or equally silent — still fails.
+_DIAGNOSTIC_PARITY_PAYLOADS = {
+    "live-shape": (MIXED_PRODUCT_RELEASES, ["logging-6.6"]),
+    "no-ocp-release": (NO_OCP_GA_RELEASES, ["logging-6.6", "quay-3.18"]),
+    "nothing-ignored": ({"ga_dates": {"4.19": "d", "5.0": "d"}}, None),
+    "over-the-sample-bound": (
+        {"ga_dates": _LONG_SYNTHETIC_KEYS},
+        [f"logging-6.{index}" for index in sorted(range(40), key=str)][:7],
+    ),
+    "hostile-key": (
+        {"ga_dates": {"4.19": "d", "logging-6.6\n[ERROR] forged " + "x" * 300: "d"}},
+        ["logging-6.6ERROR"],
+    ),
+    "degenerate-keys": (
+        {"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}},
+        ["?", "4.", "4.x"],
+    ),
+    # The builtin echo would swallow these, leaving a count with no name.
+    "flag-shaped-keys": ({"ga_dates": {"4.19": "d", "-e": "d", "-n": "d"}}, ["-e", "-n"]),
+    # Fullwidth digits are dropped by both charset filters; the ASCII dot
+    # between them is all that is left of the name.
+    "non-ascii-digits": ({"ga_dates": {"4.19": "d", "４.１９": "d"}}, ["."]),
+    "okd-with-version-shaped-key": (
+        {
+            "ga_dates": {"4.19": "d", "9.9": "d"},
+            "release_attrs": {"9.9": {"product": "OKD"}},
+        },
+        ["9.9"],
+    ),
+    "unusable-release-attrs": (
+        {"ga_dates": {"4.19": "d", "logging-6.6": "d"}, "release_attrs": "nope"},
+        ["logging-6.6"],
+    ),
+    "no-ga-dates": ({"releases": ["4.19"]}, None),
+}
+
+
+@pytest.mark.parametrize("label", sorted(_DIAGNOSTIC_PARITY_PAYLOADS))
+def test_ignored_key_diagnostic_matches_between_resolvers(label, capsys):
+    payload, expected_names = _DIAGNOSTIC_PARITY_PAYLOADS[label]
+    body = json.dumps(payload)
+
+    shell = _shell_ignored_diagnostic(body)
+    python = _python_ignored_diagnostic(body, capsys)
+    assert shell == python, f"the two resolvers disagree on {label}"
+
+    if expected_names is None:
+        assert shell == [], f"{label} must stay silent"
+    else:
+        assert len(shell) == 1, f"{label} must emit exactly one line"
+        assert _sample_names(shell[0]) == expected_names
+
+
+# --- README quick-reference parity -----------------------------------------
+#
+# README.md ships a curl|jq one-liner answering the same question as
+# get_latest_ga_version, so a reader who runs it must get the resolver's
+# answer. It once applied `// "OCP"` to the product value, which reads a
+# present `false` as "absent" and so kept a release both resolvers drop.
+
+README = ROOT / "README.md"
+_README_MARKER = "# Get latest GA version from Sippy"
+
+_JQ_HAS_REGEX = subprocess.run(
+    ["jq", "-ne", '"4" | test("^[0-9]$")'], capture_output=True, check=False
+).returncode == 0
+
+
+def _readme_latest_ga_program():
+    """Extract the jq program from the README's latest-GA quick reference."""
+    text = README.read_text(encoding="utf-8")
+    assert _README_MARKER in text, "README lost its latest-GA quick-reference command"
+    match = re.search(r"jq -r '([^']*)'", text.split(_README_MARKER, 1)[1])
+    assert match, "could not extract the jq program from the README snippet"
+    return match.group(1)
+
+
+def _run_jq(program, body):
+    proc = subprocess.run(
+        ["jq", "-r", program], input=body, capture_output=True, text=True, check=False
+    )
+    return proc.returncode, proc.stdout.strip(), proc.stderr
+
+
+def _resolver_latest_ga(body):
+    """Run the shipped _JQ_OCP_GA_VERSIONS program over the same payload."""
+    script = f'set -euo pipefail\nsource "{RELEASES_LIB}"\njq -r "${{_JQ_OCP_GA_VERSIONS}} | last"\n'
+    proc = subprocess.run(
+        ["bash", "-c", script], input=body, capture_output=True, text=True, check=False
+    )
+    return proc.returncode, proc.stdout.strip(), proc.stderr
+
+
+# Each payload names a way the two could drift apart.
+_README_PARITY_PAYLOADS = {
+    "live-shape": MIXED_PRODUCT_RELEASES,
+    "no-ocp-release": NO_OCP_GA_RELEASES,
+    "no-release-attrs": {"ga_dates": {"4.19": "d", "5.0": "d"}},
+    "numeric-order": {"ga_dates": {"4.9": "d", "4.20": "d", "4.10": "d"}},
+    "okd-with-version-shaped-key": {
+        "ga_dates": {"4.19": "d", "9.9": "d"},
+        "release_attrs": {"9.9": {"product": "OKD"}},
+    },
+    # The regression: `false` is a stated product, not an absent one.
+    "falsy-product": {
+        "ga_dates": {"4.19": "d", "9.9": "d"},
+        "release_attrs": {"9.9": {"product": False}},
+    },
+    "null-product": {
+        "ga_dates": {"4.19": "d"},
+        "release_attrs": {"4.19": {"product": None}},
+    },
+    "unusable-release-attrs": {"ga_dates": {"4.19": "d"}, "release_attrs": "nope"},
+    "unusable-entry": {"ga_dates": {"4.19": "d"}, "release_attrs": {"4.19": "nope"}},
+    "degenerate-keys": {"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}},
+    # jq's regex engine lets `$` match before a trailing newline, so a `$`
+    # anchored key test accepts "4.19\n" -- which the resolvers' digit checks
+    # reject -- and the command then dies in tonumber ("19\n"). The clean key
+    # alongside it is what the two must still agree on.
+    "trailing-newline-key": {"ga_dates": {"4.19\n": "d", "4.9": "d"}},
+}
+
+
+@pytest.mark.skipif(not _JQ_HAS_REGEX, reason="README snippet needs a regex-enabled jq")
+@pytest.mark.parametrize("label", sorted(_README_PARITY_PAYLOADS))
+def test_readme_quick_reference_matches_the_resolver(label):
+    body = json.dumps(_README_PARITY_PAYLOADS[label])
+
+    readme_rc, readme_out, readme_err = _run_jq(_readme_latest_ga_program(), body)
+    resolver_rc, resolver_out, resolver_err = _resolver_latest_ga(body)
+
+    assert readme_rc == 0, f"README snippet failed on {label}: {readme_err}"
+    assert resolver_rc == 0, f"resolver failed on {label}: {resolver_err}"
+    assert readme_out == resolver_out, (
+        f"README snippet and resolver disagree on {label}: "
+        f"{readme_out!r} vs {resolver_out!r}"
+    )

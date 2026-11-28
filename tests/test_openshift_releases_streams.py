@@ -145,6 +145,151 @@ def test_ocp_ga_versions_handles_an_unexpected_payload(payload, expected):
     assert openshift_releases._ocp_ga_versions(payload) == expected
 
 
+# --- the ignored-key diagnostic ---------------------------------------------
+#
+# The product filter drops keys in silence, so the 5.0 nightly resolved a GA
+# version while never naming logging-6.6 — the key its predecessors died on.
+# One bounded line now records what was dropped, on the success path as much
+# as the failure one, so the artifact explains the shape of the input.
+
+_IGNORED_MARKER = "ga_dates key(s) as non-OCP"
+
+
+def _ignored_key_line(err):
+    """Return the single ignored-key diagnostic from stderr, or None."""
+    lines = [line for line in err.splitlines() if _IGNORED_MARKER in line]
+    assert len(lines) <= 1, f"expected at most one ignored-key line, got {lines}"
+    return lines[0] if lines else None
+
+
+def _sample_names(line):
+    """The key names a diagnostic line lists, in order."""
+    return line.split("shown: ", 1)[1].split(", ")
+
+
+def test_latest_ga_names_ignored_keys_on_the_success_path(monkeypatch, capsys):
+    """The live mix resolves normally AND says what it skipped."""
+    _use_releases(monkeypatch, MIXED_PRODUCT_RELEASES)
+    assert openshift_releases.get_latest_ga_version() == MIXED_PRODUCT_LATEST_GA
+
+    err = capsys.readouterr().err
+    line = _ignored_key_line(err)
+    assert line is not None, "a resolved GA must still explain the input shape"
+    assert "Ignored 1 of 3 ga_dates key(s) as non-OCP; 1 name(s) shown" in line
+    assert _sample_names(line) == ["logging-6.6"]
+    # GA dates are response values; only key names may be logged.
+    assert not any(value in err for value in MIXED_PRODUCT_RELEASES["ga_dates"].values())
+
+
+def test_latest_ga_logs_nothing_when_every_key_is_ocp(monkeypatch, capsys):
+    """The ordinary payload stays quiet: no ignored keys, no line."""
+    _use_releases(monkeypatch, {"ga_dates": {"4.19": "d", "5.0": "d"}})
+    assert openshift_releases.get_latest_ga_version() == "5.0"
+    assert _ignored_key_line(capsys.readouterr().err) is None
+
+
+def test_ignored_key_sample_is_capped_at_the_sample_size(monkeypatch, capsys):
+    """Short names make the count the binding bound, so _DIAGNOSTIC_SAMPLE_SIZE
+    is what the sample is pinned against here rather than the character cap."""
+    ga_dates = {"4.19": "d"}
+    ga_dates.update({f"a{index}": "d" for index in range(40)})
+    _use_releases(monkeypatch, {"ga_dates": ga_dates})
+    assert openshift_releases.get_latest_ga_version() == "4.19", (
+        "sampling must not change the chosen OCP GA version"
+    )
+
+    line = _ignored_key_line(capsys.readouterr().err)
+    assert "Ignored 40 of 41 ga_dates key(s) as non-OCP" in line, line
+    sample_size = openshift_releases._DIAGNOSTIC_SAMPLE_SIZE
+    names = _sample_names(line)
+    assert len(names) == sample_size, f"sample of {len(names)} is not capped at {sample_size}"
+    assert f"{sample_size} name(s) shown" in line
+    assert all(name in ga_dates for name in names)
+
+
+def test_ignored_key_sample_is_capped_in_characters(monkeypatch, capsys):
+    """Longer names hit the character cap first, below the sample size, and the
+    line still fits the budget every diagnostic here observes."""
+    ga_dates = {"4.19": "d"}
+    ga_dates.update({f"logging-6.{index}": "d" for index in range(40)})
+    _use_releases(monkeypatch, {"ga_dates": ga_dates})
+    assert openshift_releases.get_latest_ga_version() == "4.19"
+
+    line = _ignored_key_line(capsys.readouterr().err)
+    assert "Ignored 40 of 41 ga_dates key(s) as non-OCP" in line, line
+    names = _sample_names(line)
+    assert 0 < len(names) < openshift_releases._DIAGNOSTIC_SAMPLE_SIZE
+    assert f"{len(names)} name(s) shown" in line
+    assert len(line) < 200, f"diagnostic line is {len(line)} characters"
+    # The character cap never splits a name.
+    assert all(name in ga_dates for name in names)
+
+
+def test_ignored_key_names_are_sanitized(monkeypatch, capsys):
+    """A hostile key cannot forge a log line or smuggle a long payload."""
+    hostile = "logging-6.6\n[ERROR] forged line " + "x" * 300
+    _use_releases(monkeypatch, {"ga_dates": {"4.19": "d", hostile: "d"}})
+    assert openshift_releases.get_latest_ga_version() == "4.19"
+
+    err = capsys.readouterr().err
+    line = _ignored_key_line(err)
+    assert "Ignored 1 of 2 ga_dates key(s) as non-OCP; 1 name(s) shown" in line
+    # Pinned exactly: truncation to _DIAGNOSTIC_KEY_MAX_LEN runs BEFORE the
+    # charset filter, so the first 20 characters of the key survive minus the
+    # newline, brackets and space. Filtering first would leave "...ERRORforg".
+    assert _sample_names(line) == ["logging-6.6ERROR"]
+    assert "forged" not in err
+    assert "xxx" not in err
+    assert len(line) < 200
+
+
+def test_ignored_key_names_collapse_when_nothing_survives(monkeypatch, capsys):
+    """A key the charset filter empties still occupies a slot, so the names
+    shown keep matching the keys they stand for."""
+    _use_releases(
+        monkeypatch, {"ga_dates": {"4.19": "d", "": "d", "4.": "d", "4.x": "d"}}
+    )
+    assert openshift_releases.get_latest_ga_version() == "4.19"
+    line = _ignored_key_line(capsys.readouterr().err)
+    assert _sample_names(line) == ["?", "4.", "4.x"]
+
+
+def test_ignored_key_names_cope_with_a_non_string_key(capsys):
+    """JSON keys are always strings, but hand-built payloads reach this too."""
+    openshift_releases.log_ignored_ga_keys({"ga_dates": {1: "d", "4.19": "d"}})
+    assert _sample_names(_ignored_key_line(capsys.readouterr().err)) == ["1"]
+
+
+def test_ignored_keys_are_named_when_no_ocp_release_ga(monkeypatch, capsys):
+    """The failure path keeps its classification and gains the key names."""
+    _use_releases(monkeypatch, NO_OCP_GA_RELEASES)
+    with pytest.raises(SystemExit):
+        openshift_releases.get_latest_ga_version()
+
+    err = capsys.readouterr().err
+    assert "No GA OCP versions found" in err
+    line = _ignored_key_line(err)
+    assert "Ignored 2 of 2 ga_dates key(s) as non-OCP; 2 name(s) shown" in line
+    assert _sample_names(line) == ["logging-6.6", "quay-3.18"]
+    assert not any(value in err for value in NO_OCP_GA_RELEASES["ga_dates"].values())
+
+
+@pytest.mark.parametrize("payload", [
+    {},
+    {"ga_dates": {}},
+    {"ga_dates": "not-a-mapping"},
+    {"ga_dates": ["4.19"]},
+    # fetch_sippy_releases() rejects a non-object root before this is reached,
+    # but the helper stays total anyway, as the jq twin's `objects` guard does.
+    "not-a-mapping-either",
+    None,
+])
+def test_ignored_key_diagnostic_survives_an_unexpected_payload(payload, capsys):
+    """Nothing to report is reported as nothing, never as an exception."""
+    openshift_releases.log_ignored_ga_keys(payload)
+    assert _ignored_key_line(capsys.readouterr().err) is None
+
+
 # --- fetch_sippy_releases / fetch_sippy_ga_dates ----------------------------
 
 def _stub_sippy_response(monkeypatch, body):
